@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.egg-info/
+.env
+docker/langfuse/.env
+carecall.db
+runs/
+.pytest_cache/
+logs/
+*.log
+*.out
+*.err
+tunnel.log
+.claude/

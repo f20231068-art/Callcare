@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CareCall</title>
+<style>
+:root {
+  --bg: #f4f6f8; --panel: #ffffff; --fg: #17202e; --muted: #5b6678; --line: #dde2ea;
+  --accent: #0f6e8c; --accent-fg: #ffffff; --ok: #1a7f4b; --warn: #b36b00; --bad: #b42318; --live: #d92d20;
+  --chip: #e8edf3; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root { --bg:#0f141b; --panel:#171e28; --fg:#e7ecf3; --muted:#93a0b4; --line:#293242;
+  --accent:#4db3d1; --accent-fg:#06222c; --ok:#4cc38a; --warn:#f0b24b; --bad:#f97066; --live:#ff6b5e; --chip:#222b38; color-scheme: dark; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, "Segoe UI", sans-serif;
+  padding: 0 max(16px, env(safe-area-inset-left)) 48px max(16px, env(safe-area-inset-right)); }
+.wrap { max-width: 1180px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0; } h2 { font-size: 13px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 16px 0; }
+header .right { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.c4 { grid-column: span 4; } .c5 { grid-column: span 5; } .c6 { grid-column: span 6; } .c7 { grid-column: span 7; } .c8 { grid-column: span 8; } .c12 { grid-column: span 12; }
+@media (max-width: 860px) { .c4,.c5,.c6,.c7,.c8 { grid-column: span 12; } }
+input, select, button, textarea { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button { cursor: pointer; } button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+button.ghost { background: transparent; } button:disabled { opacity: .5; cursor: default; }
+label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; } .row > * { flex: 1 1 140px; min-width: 0; }
+.err { color: var(--bad); margin-top: 10px; min-height: 18px; } .note { color: var(--muted); font-size: 12px; }
+table { width: 100%; border-collapse: collapse; } th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; }
+td, th { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; } .scroll { overflow-x: auto; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 99px; background: var(--chip); font-size: 12px; white-space: nowrap; }
+.pill.live { background: var(--live); color: #fff; } .pill.ok { color: var(--ok); } .pill.bad { color: var(--bad); } .pill.warn { color: var(--warn); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 6px; }
+.dot.off { background: var(--bad); }
+.big { font: 600 34px/1.1 var(--mono); font-variant-numeric: tabular-nums; } .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.turn { padding: 6px 10px; border-radius: 8px; margin: 6px 0; max-width: 85%; } .turn.agent { background: var(--chip); }
+.turn.parent { background: var(--accent); color: var(--accent-fg); margin-left: auto; } .turns { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; }
+.feed { max-height: 360px; overflow-y: auto; font-size: 12px; } .feed div { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.feed summary { cursor: pointer; } .feed pre { margin: 4px 0; white-space: pre-wrap; word-break: break-all; color: var(--muted); }
+.flash { animation: flash 1.6s ease-out; } @keyframes flash { from { background: color-mix(in srgb, var(--accent) 35%, transparent); } to { background: transparent; } }
+.hidden { display: none !important; } .tabs { display: flex; gap: 6px; margin-bottom: 12px; } .tabs button.on { background: var(--accent); color: var(--accent-fg); }
+.med { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 8px; }
+.narrow { max-width: 520px; margin: 40px auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- Sign up / log in -->
+<section id="auth" class="narrow hidden">
+  <h1>CareCall</h1><p class="note">Gentle reminder calls for your parents: medicines, meals and appointments.</p>
+  <div class="card">
+    <div class="tabs"><button id="tab-signup" class="on">Create account</button><button id="tab-login">Log in</button></div>
+    <form id="auth-form">
+      <div id="name-row"><label for="a-name">Your name</label><input id="a-name" autocomplete="name" style="width:100%"></div>
+      <label for="a-email">Email</label><input id="a-email" type="email" autocomplete="email" required style="width:100%">
+      <label for="a-pass">Password (8+ characters)</label><input id="a-pass" type="password" autocomplete="current-password" required style="width:100%">
+      <div class="err" id="auth-err"></div><button class="primary" id="auth-go" type="submit">Create account</button>
+    </form>
+  </div>
+</section>
+
+<!-- Onboarding -->
+<section id="onboard" class="narrow hidden">
+  <h1>Who should we call?</h1><p class="note">We will phone your parent at the times below. You can pause the calls any time from the dashboard.</p>
+  <form id="ob-form" class="card">
+    <div class="row"><div><label for="ob-name">Parent's full name</label><input id="ob-name" required style="width:100%"></div>
+      <div><label for="ob-pref">What we call them</label><input id="ob-pref" placeholder="e.g. Amma" style="width:100%"></div></div>
+    <div class="row"><div><label for="ob-phone">Parent's phone number</label><input id="ob-phone" type="tel" required placeholder="10 digits, or +country code" style="width:100%"></div>
+      <div><label for="ob-tz">Time zone</label><input id="ob-tz" style="width:100%"></div></div>
+    <label>Meal times (we check in 30 minutes after each; leave snack empty to skip)</label>
+    <div class="row" id="ob-meals"></div>
+    <label>Medicines</label><div id="ob-meds"></div>
+    <button type="button" class="ghost" id="ob-addmed" style="margin-top:8px">+ Add a medicine</button>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:14px;color:var(--fg)"><input id="ob-consent" type="checkbox" style="margin-top:3px">
+      <span>My parent knows about these calls and is happy to receive them.</span></label>
+    <div class="err" id="ob-err"></div>
+    <div class="row"><button class="primary" type="submit" id="ob-go">Save and start calls</button><button type="button" class="ghost hidden" id="ob-cancel">Cancel</button></div>
+  </form>
+</section>
+
+<!-- Dashboard -->
+<section id="dash" class="hidden">
+  <header>
+    <div><h1>CareCall</h1><span class="note" id="who"></span></div>
+    <div class="right"><select id="parent-pick" aria-label="Parent"></select><button class="ghost" id="add-parent">Add parent</button>
+      <span class="note" id="clock"></span><button class="ghost" id="logout">Log out</button></div>
+  </header>
+  <div class="grid">
+    <div class="card c5"><h2>Next call</h2><div class="big" id="next-count">--</div><div id="next-what" class="note"></div>
+      <div style="margin-top:12px" id="calling-state"></div></div>
+    <div class="card c7"><h2>Test a reminder call</h2>
+      <form id="rem-form" class="row" style="align-items:flex-end">
+        <div style="flex:3 1 200px"><label for="rem-msg">What should the call remind about?</label><input id="rem-msg" style="width:100%" value="Time for your evening walk"></div>
+        <div style="flex:1 1 90px"><label for="rem-min">In (minutes)</label><input id="rem-min" type="number" min="0.5" step="0.5" value="1" style="width:100%"></div>
+        <div style="flex:0 0 auto"><button class="primary" type="submit">Call in this many minutes</button></div></form>
+      <div class="err" id="rem-msg-out"></div>
+      <div class="note">Creates a one-off reminder and puts it on the calendar. During the call, ask the agent to "remind me in 3 minutes" and watch the calendar below.</div></div>
+
+    <div class="card c12"><h2>Calendar: calls waiting and in progress</h2><div class="scroll"><table><thead><tr><th>#</th><th>About</th><th>Type</th><th>When</th><th>Countdown</th><th>Status</th></tr></thead><tbody id="upcoming"></tbody></table></div></div>
+
+    <div class="card c7"><h2 id="focus-title">Call</h2><div id="focus-meta" class="note"></div><div class="turns" id="turns"></div></div>
+    <div class="card c5"><h2>What the agent recorded</h2><div id="facts" class="feed"></div><h2 style="margin-top:14px">Call-backs booked</h2><div id="callbacks" class="feed"></div></div>
+
+    <div class="card c7"><h2>Routines</h2><div class="scroll"><table><thead><tr><th>Routine</th><th>Detail</th><th>Next call</th></tr></thead><tbody id="routines"></tbody></table></div>
+      <div class="note" id="meals-note" style="margin-top:8px"></div></div>
+    <div class="card c5"><h2>Recent calls</h2><div class="scroll"><table><thead><tr><th>#</th><th>About</th><th>Result</th></tr></thead><tbody id="recent"></tbody></table></div></div>
+
+    <div class="card c12"><h2>Activity log (newest first, updates live)</h2><div class="feed" id="events"></div></div>
+  </div>
+</section>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let me = null, defaults = null, parentId = null, mode = "signup", offset = 0, snap = null, timer = null, seenEvents = new Set(), seenUpcoming = new Set();
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { credentials: "same-origin", headers: { "Content-Type": "application/json" }, ...opts });
+  let body = null; try { body = await r.json(); } catch (e) {}
+  if (!r.ok) { const e = new Error((body && (body.detail?.[0]?.msg || body.detail)) || r.statusText); e.status = r.status; throw e; }
+  return body;
+}
+function show(which) { for (const id of ["auth", "onboard", "dash"]) $(id).classList.toggle("hidden", id !== which); }
+
+/* ---------- sign up / log in ---------- */
+function setMode(m) { mode = m; $("tab-signup").classList.toggle("on", m === "signup"); $("tab-login").classList.toggle("on", m === "login");
+  $("name-row").classList.toggle("hidden", m !== "signup"); $("auth-go").textContent = m === "signup" ? "Create account" : "Log in"; $("auth-err").textContent = ""; }
+$("tab-signup").onclick = () => setMode("signup"); $("tab-login").onclick = () => setMode("login");
+$("auth-form").onsubmit = async e => {
+  e.preventDefault(); $("auth-err").textContent = "";
+  try {
+    await api(mode === "signup" ? "/auth/signup" : "/auth/login", { method: "POST", body: JSON.stringify(
+      { name: $("a-name").value, email: $("a-email").value, password: $("a-pass").value }) });
+    await boot();
+  } catch (err) { $("auth-err").textContent = err.message; }
+};
+$("logout").onclick = async () => { await api("/auth/logout", { method: "POST" }); clearInterval(timer); me = null; show("auth"); };
+
+/* ---------- onboarding ---------- */
+function medRow() {
+  const d = document.createElement("div"); d.className = "med";
+  const meals = Object.keys(defaults.meals).map(m => `<option>${esc(m)}</option>`).join("");
+  d.innerHTML = `<div class="row"><input class="m-name" placeholder="Medicine name" aria-label="Medicine name"><input class="m-dose" placeholder="Dose, e.g. 500mg" aria-label="Dose">
+    <select class="m-timing" aria-label="Timing"><option value="before_food">before food</option><option value="after_food" selected>after food</option><option value="with_food">with food</option></select>
+    <select class="m-meal" aria-label="Meal">${meals}</select><button type="button" class="ghost m-del">Remove</button></div>`;
+  d.querySelector(".m-del").onclick = () => d.remove(); return d;
+}
+function initOnboardForm(first) {
+  $("ob-tz").value = defaults.timezone; $("ob-cancel").classList.toggle("hidden", first);
+  $("ob-meals").innerHTML = ["breakfast", "lunch", "snack", "dinner"].map(m => `<div><label for="meal-${m}">${m}</label>
+    <input id="meal-${m}" type="time" value="${esc(defaults.meals[m] || "")}" style="width:100%"></div>`).join("");
+  $("ob-meds").innerHTML = ""; $("ob-err").textContent = "";
+}
+$("ob-addmed").onclick = () => $("ob-meds").appendChild(medRow());
+$("add-parent").onclick = () => { initOnboardForm(false); show("onboard"); };
+$("ob-cancel").onclick = () => show("dash");
+$("ob-form").onsubmit = async e => {
+  e.preventDefault(); $("ob-err").textContent = ""; $("ob-go").disabled = true;
+  const meals = {}; for (const m of ["breakfast", "lunch", "snack", "dinner"]) { const v = $("meal-" + m).value; if (v) meals[m] = v; }
+  const medicines = [...document.querySelectorAll("#ob-meds .med")].map(d => ({ name: d.querySelector(".m-name").value, dose_note: d.querySelector(".m-dose").value,
+    timing: d.querySelector(".m-timing").value, meal_anchor: d.querySelector(".m-meal").value }));
+  try {
+    const r = await api("/api/onboarding", { method: "POST", body: JSON.stringify({ parent_name: $("ob-name").value, preferred_name: $("ob-pref").value,
+      phone: $("ob-phone").value, timezone: $("ob-tz").value, consent: $("ob-consent").checked, meals, medicines }) });
+    parentId = r.parent_id; await boot();
+  } catch (err) { $("ob-err").textContent = err.message; } finally { $("ob-go").disabled = false; }
+};
+
+/* ---------- dashboard ---------- */
+const fmtTime = iso => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const fmtDur = s => { const neg = s < 0; s = Math.abs(Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return (neg ? "-" : "") + (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0"); };
+const nowMs = () => Date.now() + offset;
+const KIND = { scheduled: "planned", callback: "call-back", retry: "retry", manual: "manual" };
+const STATUS_CLS = { in_progress: "live", ringing: "live", dialing: "live", completed: "ok", failed: "bad", no_answer: "warn", abandoned: "warn" };
+
+async function refresh() {
+  try { snap = await api("/api/dashboard" + (parentId ? "?parent_id=" + parentId : "")); }
+  catch (e) { if (e.status === 401) { clearInterval(timer); show("auth"); } return; }
+  offset = new Date(snap.server_time).getTime() - Date.now();
+  if (!snap.parent) { initOnboardForm(true); show("onboard"); clearInterval(timer); return; }
+  const p = snap.parent; parentId = p.id;
+  $("parent-pick").innerHTML = snap.parents.map(x => `<option value="${x.id}" ${x.id === p.id ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+  $("who").textContent = `${me.name} · looking after ${p.name} (${p.phone_masked}) · ${p.timezone}`;
+  $("calling-state").innerHTML = `<span class="dot ${p.calling_enabled ? "" : "off"}"></span>${p.calling_enabled ? "Calls are on" : "Calls are paused"}
+    <button class="ghost" id="toggle-calls" style="margin-left:10px">${p.calling_enabled ? "Pause calls" : "Resume calls"}</button>`;
+  $("toggle-calls").onclick = async () => { await api(`/api/parents/${p.id}/calling?enabled=${!p.calling_enabled}`, { method: "POST" }); refresh(); };
+
+  const up = p.upcoming;
+  $("upcoming").innerHTML = up.length ? up.map(c => { const fresh = !seenUpcoming.has(c.id) && seenUpcoming.size > 0; seenUpcoming.add(c.id);
+    return `<tr class="${fresh ? "flash" : ""}"><td>${c.id}</td><td>${esc(c.routine.replace(/_/g, " "))}</td><td><span class="pill">${KIND[c.kind] || esc(c.kind)}${c.attempt_no > 1 ? " · try " + c.attempt_no : ""}</span></td>
+    <td class="mono">${fmtTime(c.scheduled_at)}</td><td class="mono" data-t="${esc(c.scheduled_at)}" data-s="${esc(c.status)}"></td>
+    <td><span class="pill ${STATUS_CLS[c.status] || ""}">${esc(c.status.replace("_", " "))}</span></td></tr>`; }).join("")
+    : `<tr><td colspan="6" class="note">Nothing waiting. Add a test reminder above.</td></tr>`;
+  const nextC = up.find(c => c.status === "scheduled");
+  $("next-what").textContent = nextC ? `${nextC.routine.replace(/_/g, " ")} at ${fmtTime(nextC.scheduled_at)} (${KIND[nextC.kind] || nextC.kind})` : (up.length ? "A call is in progress" : "No call is scheduled");
+  $("next-count").dataset.t = nextC ? nextC.scheduled_at : "";
+
+  $("routines").innerHTML = p.routines.map(r => `<tr><td>${esc(r.key.replace(/_/g, " "))}</td><td>${esc(r.detail)}</td>
+    <td class="mono">${r.next_call_at ? fmtTime(r.next_call_at) + (new Date(r.next_call_at).toDateString() !== new Date().toDateString() ? " tomorrow" : "") + (r.next_is_booked ? "" : " <span class=note>(expected)</span>") : "<span class=note>none</span>"}</td></tr>`).join("");
+  $("meals-note").textContent = "Meal times: " + Object.entries(p.meal_times).map(([k, v]) => `${k} ${v}`).join(", ") + ` · quiet hours ${p.quiet_hours} (no call-backs)`;
+  $("recent").innerHTML = p.recent.length ? p.recent.map(c => `<tr><td>${c.id}</td><td>${esc(c.routine.replace(/_/g, " "))}</td><td><span class="pill ${STATUS_CLS[c.status] || ""}">${esc(c.status)}</span>
+    <span class="note">${esc(c.outcome || c.end_reason || "")}</span></td></tr>`).join("") : `<tr><td colspan="3" class="note">No finished calls yet.</td></tr>`;
+
+  const f = p.focus;
+  $("focus-title").innerHTML = f ? `${f.live ? '<span class="pill live">LIVE</span> ' : ""}Call ${f.id} · ${esc(f.routine.replace(/_/g, " "))}` : "Call";
+  $("focus-meta").textContent = f ? `${f.status}${f.outcome ? " · outcome: " + f.outcome : ""}${f.end_reason ? " · ended: " + f.end_reason : ""}${f.twilio_sid ? " · " + f.twilio_sid : ""}` : "The latest or live conversation shows here.";
+  const tEl = $("turns"), stick = tEl.scrollTop + tEl.clientHeight >= tEl.scrollHeight - 30;
+  tEl.innerHTML = f && f.transcript.length ? f.transcript.map(t => `<div class="turn ${esc(t.speaker)}"><div class="note" style="color:inherit;opacity:.7">${esc(t.speaker)}</div>${esc(t.text)}</div>`).join("")
+    : `<div class="note">No words yet.</div>`;
+  if (stick) tEl.scrollTop = tEl.scrollHeight;
+  $("facts").innerHTML = p.facts.length ? p.facts.map(x => `<div><b>${esc(x.text)}</b><br><span class="note">${x.quote ? "“" + esc(x.quote) + "” · " : ""}${fmtTime(x.at)}</span></div>`).join("") : `<div class="note">Nothing logged yet.</div>`;
+  $("callbacks").innerHTML = p.callbacks.length ? p.callbacks.map(x => `<div>Call ${x.call_id}: back in ${x.delay_minutes} min <span class="pill">${esc(x.status)}</span><br><span class="note">${esc(x.reason)} · ${fmtTime(x.created_at)}</span></div>`).join("") : `<div class="note">None.</div>`;
+  $("events").innerHTML = p.events.map(e => { const fresh = seenEvents.size > 0 && !seenEvents.has(e.id); seenEvents.add(e.id);
+    return `<div class="${fresh ? "flash" : ""}"><details><summary><span class="mono">${fmtTime(e.at)}</span> · call ${e.call_id ?? "-"} · <b>${esc(e.type)}</b></summary><pre>${esc(JSON.stringify(e.payload, null, 1))}</pre></details></div>`; }).join("");
+  show("dash");
+}
+function tick() {
+  $("clock").textContent = snap && snap.parent ? "parent's clock " + new Date(nowMs()).toLocaleTimeString("en-GB", { timeZone: snap.parent.timezone }) : "";
+  for (const el of document.querySelectorAll("[data-t]")) { if (!el.dataset.t) { if (el.id === "next-count") el.textContent = "--"; continue; }
+    const s = (new Date(el.dataset.t).getTime() - nowMs()) / 1000;
+    el.textContent = el.dataset.s && el.dataset.s !== "scheduled" ? "now" : (s <= 0 ? "due" : fmtDur(s)); }
+}
+$("parent-pick").onchange = e => { parentId = Number(e.target.value); seenEvents.clear(); seenUpcoming.clear(); refresh(); };
+$("rem-form").onsubmit = async e => {
+  e.preventDefault(); const out = $("rem-msg-out"); out.style.color = "var(--muted)"; out.textContent = "";
+  try {
+    const r = await api(`/api/parents/${parentId}/reminders`, { method: "POST", body: JSON.stringify({ message: $("rem-msg").value, in_minutes: Number($("rem-min").value) }) });
+    out.textContent = `Booked: call ${r.call_id} at ${r.at_local.slice(11)}${r.calling_enabled ? "" : " (calls are paused, so it will be cancelled)"}${r.in_quiet_hours ? " (inside quiet hours)" : ""}.`; refresh();
+  } catch (err) { out.style.color = "var(--bad)"; out.textContent = err.message; }
+};
+async function boot() {
+  try { me = await api("/api/me"); } catch (e) { setMode("signup"); show("auth"); return; }
+  if (!defaults) defaults = me.defaults;
+  clearInterval(timer); await refresh(); if (snap && snap.parent) { timer = setInterval(refresh, 2000); }
+}
+setInterval(tick, 500);
+boot();
+</script>
+</body>
+</html>

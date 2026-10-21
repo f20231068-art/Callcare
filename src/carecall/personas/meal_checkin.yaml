@@ -1,0 +1,72 @@
+# Use case: meal_checkin (lunch). Steps: ate (yes/no) then, if yes, items (what did you have).
+
+- id: mc_happy_lakshmi
+  usecase: meal_checkin
+  routine: lunch_checkin
+  name: Lakshmi, 68
+  profile: Cheerful and organised. Ate on time and says exactly what she had.
+  traits: [clear, cheerful]
+  truth: {ate: true, items: [rice, sambar, curd]}
+  lines:
+    ate: ["Yes, I had lunch."]
+    items: ["Rice, sambar and a little curd."]
+  expect:
+    end_reason: completed
+    meal_logs: [{meal_type: lunch, status: eaten, items_include: [rice, sambar, curd]}]
+    alerts: []
+
+- id: mc_not_yet_busy_ramesh
+  usecase: meal_checkin
+  routine: lunch_checkin
+  name: Ramesh, 74
+  profile: Absorbed in his TV serial; has not eaten yet but will. Easygoing.
+  traits: [distracted, easygoing]
+  truth: {ate: false}
+  lines:
+    ate: ["Not yet, my serial is on. I will eat in a while."]
+  expect:
+    end_reason: callback
+    meal_logs: [{meal_type: lunch, status: not_yet}]
+    callbacks: [{delay_minutes: 30}]
+
+- id: mc_low_appetite_sarla
+  usecase: meal_checkin
+  routine: lunch_checkin
+  name: Sarla, 77
+  profile: Recently widowed, eating alone, low mood. Skipped lunch because she has no appetite. A real concern for the family.
+  traits: [low_mood, lonely, soft_spoken]
+  truth: {ate: false, skipped: true, reason: "no appetite, eating alone since husband passed"}
+  lines:
+    ate: ["No. I did not feel like eating. There is nobody to eat with, no appetite these days."]
+  expect:
+    meal_logs: [{meal_type: lunch, status: skipped}]
+    alerts_include: [{severity: warning}]
+
+- id: mc_mild_symptom_hari
+  usecase: meal_checkin
+  routine: lunch_checkin
+  name: Hari, 71
+  profile: Ate lunch but mentions in passing he felt dizzy afterwards. Not an emergency but the family should know.
+  traits: [matter_of_fact, mentions_symptoms_casually]
+  truth: {ate: true, items: [dal, rice], symptom: "a little dizzy after lunch"}
+  lines:
+    ate: ["Yes I had lunch, but I felt a little dizzy afterwards."]
+    items: ["Dal and rice."]
+  expect:
+    end_reason: completed
+    meal_logs: [{meal_type: lunch, status: eaten, items_include: [dal, rice]}]
+    alerts_include: [{severity: warning}]
+
+- id: mc_forgetful_dwarka
+  usecase: meal_checkin
+  routine: lunch_checkin
+  name: Dwarka, 84
+  profile: Early memory loss. Genuinely cannot recall whether he ate. The agent must NOT guess for him.
+  traits: [forgetful, anxious, honest]
+  truth: {ate: unknown}
+  lines:
+    ate: ["Did I? I do not remember.", "Maybe. I am not sure, beta.", "I cannot remember."]
+  expect:
+    end_reason: completed
+    meal_logs: [{meal_type: lunch, status: unclear}]
+    alerts_include: [{severity: info}]

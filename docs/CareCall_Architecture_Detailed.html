@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CareCall Architecture in Detail</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky index on the left, one reading column. Every user action is a card you can open to see the path it takes and the exact rows it writes. */
+:root {
+  --bg: #f4f5f8; --panel: #ffffff; --fg: #18202e; --muted: #596478; --line: #d8dde6; --soft: #eceff4;
+  --accent: #0f6e8c; --accent-soft: #dcedf3;
+  --http: #4b5a78; --ws: #0b7a75; --sse: #b45309; --db: #6d4aa8; --llm: #b3306c;
+  --ok: #1a7f4b; --warn: #a76100; --bad: #b42318;
+  --font: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif; --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11151c; --panel: #181e28; --fg: #e5e9f0; --muted: #96a2b6; --line: #2a3242; --soft: #212939; --accent: #55b6d3; --accent-soft: #17313b;
+  --http: #9aa9c8; --ws: #4fd1c5; --sse: #f6ad55; --db: #b79cf0; --llm: #f08ab8; --ok: #4cc38a; --warn: #f0b24b; --bad: #f97066; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #11151c; --panel: #181e28; --fg: #e5e9f0; --muted: #96a2b6; --line: #2a3242; --soft: #212939; --accent: #55b6d3; --accent-soft: #17313b;
+  --http: #9aa9c8; --ws: #4fd1c5; --sse: #f6ad55; --db: #b79cf0; --llm: #f08ab8; --ok: #4cc38a; --warn: #f0b24b; --bad: #f97066; color-scheme: dark; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.62 var(--font);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 64px; }
+.shell { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; }
+nav.index { position: sticky; top: 0; align-self: start; max-height: 100vh; overflow-y: auto; padding: 28px 0; }
+nav.index b { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+nav.index a { display: block; padding: 4px 10px; margin-left: -10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13.5px; }
+nav.index a:hover, nav.index a.on { color: var(--fg); background: var(--soft); }
+main { min-width: 0; padding-top: 28px; }
+@media (max-width: 900px) {
+  .shell { display: block; }
+  nav.index { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; gap: 6px; overflow-x: auto; padding: 10px 0; background: var(--bg); max-height: none; border-bottom: 1px solid var(--line); }
+  nav.index b { display: none; } nav.index a { white-space: nowrap; margin: 0; }
+}
+h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 10px; text-wrap: balance; letter-spacing: -.01em; }
+h2 { font-size: 1.35rem; line-height: 1.25; margin: 56px 0 6px; padding-top: 20px; border-top: 1px solid var(--line); text-wrap: balance; }
+h2 small { display: block; font: 500 12px var(--mono); color: var(--accent); letter-spacing: .04em; margin-bottom: 4px; }
+h3 { font-size: 1.02rem; margin: 26px 0 6px; }
+p { margin: 8px 0; max-width: 78ch; } ul, ol { max-width: 82ch; padding-left: 1.25em; } li { margin: 3px 0; }
+.lede { font-size: 1.08rem; color: var(--muted); max-width: 72ch; }
+code { font: 500 .86em var(--mono); background: var(--soft); padding: 1px 5px; border-radius: 4px; word-break: break-word; }
+pre { background: var(--soft); border-radius: 8px; padding: 10px 12px; overflow-x: auto; font: 400 12.5px/1.55 var(--mono); margin: 8px 0; white-space: pre; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin: 12px 0; }
+.card h4 { margin: 0 0 4px; font-size: .95rem; } .card p { margin: 4px 0; font-size: .92rem; color: var(--muted); }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; } th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: .03em; }
+th, td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; } tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 500; } td.nw { white-space: nowrap; }
+.diagram { padding: 10px; } svg { display: block; width: 100%; height: auto; min-width: 900px; }
+svg text { font-family: var(--font); fill: var(--fg); }
+.pill { display: inline-block; padding: 0 8px; border-radius: 99px; font-size: 12px; background: var(--soft); white-space: nowrap; margin: 1px 2px 1px 0; }
+.pill.ok { color: var(--ok); } .pill.warn { color: var(--warn); } .pill.bad { color: var(--bad); }
+.pill.w { background: color-mix(in srgb, var(--db) 16%, var(--panel)); color: var(--db); font-family: var(--mono); font-size: 11.5px; }
+.pill.r { background: var(--soft); color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); margin: 8px 0; }
+.legend span::before { content: ""; display: inline-block; width: 26px; border-top: 3px solid var(--c); margin-right: 7px; vertical-align: middle; }
+.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; max-width: 82ch; }
+.callout.warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--panel)); }
+.callout.bad { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--panel)); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; align-items: center; }
+.toolbar button { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; }
+.toolbar button.on { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+.toolbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+details.act { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin: 8px 0; }
+details.act > summary { cursor: pointer; padding: 11px 14px; list-style: none; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+details.act > summary::-webkit-details-marker { display: none; }
+details.act > summary::before { content: "+"; font: 500 16px var(--mono); color: var(--muted); width: 14px; }
+details.act[open] > summary::before { content: "-"; }
+details.act[open] > summary { border-bottom: 1px solid var(--line); }
+.aid { font: 500 11.5px var(--mono); padding: 1px 7px; border-radius: 5px; background: var(--soft); }
+.aid.Caregiver { color: var(--accent); } .aid.Parent { color: var(--llm); } .aid.System { color: var(--sse); } .aid.Operator { color: var(--ok); }
+.atitle { font-weight: 600; } .asub { color: var(--muted); font-size: .88rem; flex-basis: 100%; padding-left: 24px; }
+.abody { padding: 4px 16px 14px; display: grid; gap: 4px; }
+.abody h5 { margin: 12px 0 2px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.abody .path { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: .88rem; }
+.abody .path span.s { background: var(--soft); border-radius: 6px; padding: 2px 8px; }
+.abody .path span.a { color: var(--muted); }
+.row { border: 1px solid var(--line); border-radius: 8px; margin: 4px 0; overflow: hidden; }
+.row > div:first-child { background: color-mix(in srgb, var(--db) 12%, var(--panel)); padding: 4px 10px; font: 500 12px var(--mono); color: var(--db); }
+.row pre { margin: 0; border-radius: 0; background: var(--panel); padding: 8px 10px; font-size: 12px; }
+.grid2 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="index" aria-label="Sections">
+  <b>Architecture</b>
+  <a href="#answer">What the web server is</a><a href="#inout">What runs where</a><a href="#diagram">Detailed diagram</a><a href="#modules">Every module</a>
+  <a href="#storage">Where data is stored</a><a href="#actions">Every user action</a><a href="#example">A real call, row by row</a>
+  <a href="#tables">Every table</a><a href="#gaps">Gaps found</a>
+</nav>
+<main>
+
+<header>
+  <h1>CareCall architecture in detail</h1>
+  <p class="lede">What each program does, which things are ours and which belong to other companies, every action a caregiver or parent can take, and the exact database rows each one writes. The examples are real rows from the running system on 20 October 2026, with phone numbers hidden.</p>
+</header>
+
+<section id="answer">
+  <h2><small>THE SHORT ANSWER</small>What "web server" actually means here</h2>
+  <p>I used "web server" for one thing that was too broad. It is a single Python program, started with <code>carecall serve</code>, that listens on port 8000. By itself it is only a doorway: it receives requests and calls other code. The work is done by separate modules inside the same program, and by services outside it. This page splits it up.</p>
+  <div class="cards">
+    <div class="card"><h4>What the program does</h4><p>Receives browser requests (sign-up, dashboard) and Twilio's webhooks. Runs the conversation agent for each call. Calls Gnani, the LLM and Twilio over the internet. Reads and writes the database. Sends traces to Langfuse.</p></div>
+    <div class="card"><h4>What it does not do</h4><p><b>It does not run Gnani's speech models.</b> Speech-to-text and text-to-speech run on Gnani's servers; our code only holds a connection and an API key. It does not run the LLM either. It does not host the database, and it does not decide when to dial (a second program does).</p></div>
+    <div class="card"><h4>The two programs plus tunnel</h4><p><b>serve</b> handles requests and live calls. <b>scheduler</b> wakes every 10 s, plans calls and dials the due ones. <b>ngrok</b> gives the laptop a public address. All three use the same code base and the same PostgreSQL database.</p></div>
+  </div>
+</section>
+
+<section id="inout">
+  <h2><small>OURS VS EVERYONE ELSE'S</small>What runs where</h2>
+  <div class="scroll"><table><thead><tr><th>Thing</th><th>Who runs it</th><th>Where it lives</th><th>How we reach it</th></tr></thead><tbody>
+    <tr><td>carecall serve</td><td>Us</td><td>This laptop (a cloud server later)</td><td>Port 8000, through the tunnel for Twilio</td></tr>
+    <tr><td>carecall scheduler</td><td>Us</td><td>This laptop</td><td>No port; it only makes outgoing calls and database writes</td></tr>
+    <tr><td>PostgreSQL (the app database <code>carecall</code>)</td><td>Us, in Docker</td><td>Container <code>app-db-1</code>, port 5433</td><td>SQL over <code>DATABASE_URL</code></td></tr>
+    <tr><td>Langfuse and its databases</td><td>Us, in Docker</td><td>Six containers, port 3000</td><td>HTTP from the tracing module</td></tr>
+    <tr><td>Twilio</td><td>Twilio</td><td>Their cloud</td><td>We call their REST API to place a call; they call our webhooks and WebSocket</td></tr>
+    <tr><td>Gnani speech-to-text and text-to-speech</td><td>Gnani</td><td>Their cloud</td><td>WebSocket (STT) and HTTPS/SSE (TTS) with our API key. Used only in the live-audio mode.</td></tr>
+    <tr><td>The LLM (GPT-6 Luna)</td><td>OpenAI, through OpenRouter</td><td>Their cloud</td><td>HTTPS request per model call</td></tr>
+    <tr><td>ngrok</td><td>ngrok</td><td>Their cloud, with an agent on this laptop</td><td>Outbound connection from the laptop</td></tr>
+    <tr><td>The parent's phone, the caregiver's browser</td><td>The users</td><td>Their devices</td><td>The phone network via Twilio; HTTPS to the dashboard</td></tr>
+  </tbody></table></div>
+</section>
+
+<section id="diagram">
+  <h2><small>DETAILED DIAGRAM</small>Inside each program</h2>
+  <p>Each box inside <code>carecall serve</code> is a separate module (a Python file or two). The last lines in each box name the database tables that module writes.</p>
+  <div class="scroll diagram"><svg id="arch" viewBox="0 0 1280 740" role="img" aria-labelledby="arch-t"><title id="arch-t">Detailed architecture: actors on the left, the serve and scheduler programs in the middle with their modules, external services and PostgreSQL on the right</title></svg></div>
+  <div class="legend"><span style="--c: var(--http)">HTTPS request/response</span><span style="--c: var(--ws)">WebSocket</span><span style="--c: var(--sse)">HTTP streaming</span><span style="--c: var(--db)">SQL</span><span style="--c: var(--llm)">LLM request</span></div>
+</section>
+
+<section id="modules">
+  <h2><small>MODULE BY MODULE</small>What every box does</h2>
+  <div class="scroll"><table><thead><tr><th>Module (files)</th><th>What it does</th><th>Writes</th><th>Reads</th></tr></thead><tbody id="mods"></tbody></table></div>
+</section>
+
+<section id="storage">
+  <h2><small>STORAGE MAP</small>Where each piece of data is stored</h2>
+  <p>Only one place holds the business data: the PostgreSQL database named <code>carecall</code>. Everything else is either a different kind of record (traces, logs) or temporary.</p>
+  <div class="scroll"><table><thead><tr><th>Data</th><th>Stored in</th><th>Kept</th><th>Example</th></tr></thead><tbody id="stor"></tbody></table></div>
+</section>
+
+<section id="actions">
+  <h2><small>EVERY USER ACTION</small>What each person can do, and what gets stored</h2>
+  <p>Open a card to see the trigger, the code path, the exact rows written (with real example values), and what the user sees. A <span class="pill w">violet</span> chip is a table written, a grey chip is a table read.</p>
+  <div class="toolbar" id="filters"></div>
+  <div id="acts"></div>
+</section>
+
+<section id="example">
+  <h2><small>A REAL CALL, ROW BY ROW</small>A medicine reminder and its two call-backs</h2>
+  <p>This is the 11:23 test: a reminder for a tablet, a call-back after "remind me in 2 minutes", another after "not yet". Times are IST. Rows come from the database as they are.</p>
+  <div class="scroll"><table><thead><tr><th>Time</th><th>What happened</th><th>Where it was stored</th></tr></thead><tbody id="timeline"></tbody></table></div>
+</section>
+
+<section id="tables">
+  <h2><small>REFERENCE</small>All 20 tables</h2>
+  <div class="scroll"><table><thead><tr><th>Table</th><th>Purpose</th><th>Written by</th><th>Rows today</th></tr></thead><tbody id="tabs"></tbody></table></div>
+</section>
+
+<section id="gaps">
+  <h2><small>HONEST NOTES</small>Gaps found while collecting these examples</h2>
+  <div class="callout bad"><b>The caregiver is never actually messaged.</b> Every alert and summary is written to <code>notifications</code> with <code>sent_at</code> set, but the "send" step only prints a line to the server console. Real SMS is off (<code>SMS_NOTIFICATIONS</code>), and an account created by sign-up has no caregiver phone number (the <code>caregivers.phone</code> column is empty). The dashboard does not show notifications either, so the only place a caregiver sees an alert is the "What the agent recorded" panel.</div>
+  <div class="callout warn"><b>Call 21 went wrong, and the opening is now fixed.</b> It was the call-back for the tablet reminder. Its transcript shows a stale line spoken as the second opening sentence ("Thank you. I will call you again at eleven thirty-six this morning", at 11:36), then a question about food instead of the tablet, and a summary of "Dinner: had pancake". The stale line came from asking the model to continue from the previous transcript; call-backs now use the scripted opening. The food question was not explained, so this page's example rows for call 21 are kept as they were recorded.</div>
+  <div class="callout warn"><b>Other limits that matter here:</b> conversation memory lives in the serve process and is lost on restart; tables are created at start-up with no migrations; there is no backup of the Docker volume.</div>
+</section>
+
+</main>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+
+  /* ======================= diagram ======================= */
+  var NS = "http://www.w3.org/2000/svg", A = $("arch");
+  function mk(n, a, t) { var e = document.createElementNS(NS, n); for (var k in a) e.setAttribute(k, a[k]); if (t != null) e.textContent = t; A.appendChild(e); return e; }
+  var d = document.createElementNS(NS, "defs");
+  ["http", "ws", "sse", "db", "llm", "muted"].forEach(function (k) {
+    var m = document.createElementNS(NS, "marker"); m.setAttribute("id", "ah-" + k); m.setAttribute("viewBox", "0 0 10 10"); m.setAttribute("refX", "9"); m.setAttribute("refY", "5");
+    m.setAttribute("markerWidth", "7"); m.setAttribute("markerHeight", "7"); m.setAttribute("orient", "auto-start-reverse");
+    var p = document.createElementNS(NS, "path"); p.setAttribute("d", "M0 0 L10 5 L0 10 z"); p.setAttribute("fill", "var(--" + k + ")"); m.appendChild(p); d.appendChild(m);
+  });
+  A.appendChild(d);
+  function box(x, y, w, h, title, lines, color) {
+    mk("rect", { x: x, y: y, width: w, height: h, rx: 8, fill: "var(--panel)", stroke: color || "var(--line)", "stroke-width": color ? 1.8 : 1.2 });
+    mk("text", { x: x + 10, y: y + 20, "font-size": 12.5, "font-weight": 600 }, title);
+    (lines || []).forEach(function (l, i) {
+      var w_ = /^writes:|^reads:/.test(l);
+      mk("text", { x: x + 10, y: y + 37 + i * 14.5, "font-size": 10.8, style: "fill:" + (w_ ? "var(--db)" : "var(--muted)") + (w_ ? ";font-weight:500" : "") }, l);
+    });
+  }
+  function path(dd, kind, both, dash) {
+    var a = { d: dd, fill: "none", stroke: "var(--" + kind + ")", "stroke-width": 1.9, "marker-end": "url(#ah-" + kind + ")" };
+    if (both) a["marker-start"] = "url(#ah-" + kind + ")"; if (dash) a["stroke-dasharray"] = "6 4"; mk("path", a);
+  }
+  function lab(x, y, t, anchor) { mk("text", { x: x, y: y, "font-size": 10.8, "text-anchor": anchor || "start", style: "fill:var(--muted);paint-order:stroke;stroke:var(--bg);stroke-width:4px" }, t); }
+
+  mk("rect", { x: 250, y: 20, width: 550, height: 530, rx: 12, fill: "var(--soft)", stroke: "var(--accent)", "stroke-width": 1.6 });
+  mk("text", { x: 262, y: 14, "font-size": 12.5, "font-weight": 600 }, "Program 1: carecall serve (Python, FastAPI, port 8000)");
+  mk("rect", { x: 250, y: 575, width: 550, height: 140, rx: 12, fill: "var(--soft)", stroke: "var(--sse)", "stroke-width": 1.6 });
+  mk("text", { x: 262, y: 569, "font-size": 12.5, "font-weight": 600 }, "Program 2: carecall scheduler (Python, no port)");
+
+  box(20, 52, 200, 70, "Caregiver's browser", ["dashboard.html: sign-up,", "onboarding, dashboard"]);
+  box(20, 150, 200, 70, "Operator", ["curl or local browser:", "admin routes (local only)"]);
+  box(20, 260, 200, 160, "How to read this", ["Boxes inside a program are", "modules (Python files).", "Violet lines under a box list", "the tables that module writes.", "Gnani, Twilio and the LLM", "run in their own clouds."]);
+
+  box(264, 52, 522, 80, "HTTP + WebSocket layer (api.py)", ["/dashboard  /auth/*  /api/*  /admin/*  /health", "/twilio/voice  /twilio/turn  /twilio/wait  /twilio/status  WS /twilio/stream", "checks: cookie session, Twilio signature or per-call token, local-only for /admin"], "var(--accent)");
+  box(264, 148, 166, 92, "Accounts", ["accounts.py", "sign-up, login, sessions", "writes: accounts,", "caregivers, auth_sessions"]);
+  box(442, 148, 166, 92, "Onboarding + dashboard", ["onboarding.py", "add parent, reminders, pause", "writes: parents, routines,", "meal_profile, medicines,", "reminders, call_attempts"]);
+  box(620, 148, 166, 92, "Phone adapters", ["twilio_api.py, bridge.py,", "gather.py", "webhooks, TwiML, audio", "writes: call_attempts"]);
+  box(264, 256, 254, 96, "Agent runtime (one per call)", ["session.py + converse.py: LangGraph", "graph, guards, emergency check", "history sent to the LLM each turn", "writes: transcript_turns, events"], "var(--llm)");
+  box(532, 256, 254, 96, "Tool registry (db_tools.py)", ["18 tools; scope, args, audit", "log_meal, book_callback, raise_alert...", "writes: meal_logs, medicine_logs,", "reminder_acks, alerts, callbacks,", "reminders, call_attempts"], "var(--db)");
+  box(264, 368, 120, 92, "Post-call", ["post_call.py,", "outcome.py, notify.py", "writes: call_summaries,", "notifications"]);
+  box(398, 368, 120, 92, "In-process memory", ["LangGraph history,", "phone-mode sessions", "(lost on restart)"]);
+  box(532, 368, 120, 92, "Tracing", ["tracing.py", "spans per call", "sent to Langfuse"]);
+  box(666, 368, 120, 92, "External clients", ["gnani_speech.py,", "llm/, twilio_api REST", "no models run here"]);
+  box(264, 476, 522, 56, "Data layer (db.py + models.py)", ["pooled connections, one transaction per block, idempotency keys, row locks, 20 tables"], "var(--db)");
+
+  box(264, 608, 120, 92, "Planner", ["planner.py", "hourly: plan the day", "writes: call_attempts"]);
+  box(398, 608, 120, 92, "Dispatcher", ["scheduler.py, every 10 s", "claims due calls, dials", "writes: call_attempts,", "events"]);
+  box(532, 608, 120, 92, "Reaper", ["scheduler.py", "fails stuck calls", "writes: call_attempts"]);
+  box(666, 608, 120, 92, "Outcome engine", ["outcome.py + LLM judge", "decides the next call", "writes: call_attempts,", "callbacks"]);
+
+  box(1000, 40, 250, 100, "Twilio", ["places and carries phone calls", "calls our webhooks and WebSocket", "we call its REST API"]);
+  box(1000, 190, 250, 56, "Parent's phone", ["an ordinary phone call"]);
+  box(1000, 290, 250, 80, "Gnani (their cloud)", ["speech-to-text: WebSocket", "text-to-speech: HTTPS + SSE", "live-audio mode only"]);
+  box(1000, 400, 250, 70, "LLM via OpenRouter", ["GPT-6 Luna: agent replies,", "post-call judge, summaries"]);
+  box(1000, 500, 250, 80, "PostgreSQL (Docker)", ["database: carecall", "container app-db-1, port 5433", "all business data"], "var(--db)");
+  box(1000, 610, 250, 80, "Langfuse (Docker)", ["traces from both programs", "own databases, port 3000"]);
+
+  path("M220 87 L264 87", "http", true); lab(22, 138, "HTTPS + cookie");
+  path("M220 185 L264 125", "http", true); lab(22, 236, "local only");
+  path("M786 90 L880 90", "http", true); path("M960 90 L1000 90", "http", true);
+  mk("rect", { x: 880, y: 78, width: 80, height: 24, rx: 12, fill: "var(--panel)", stroke: "var(--line)" }); mk("text", { x: 920, y: 94, "font-size": 11, "text-anchor": "middle" }, "ngrok tunnel");
+  lab(800, 76, "webhooks + WebSocket");
+  path("M1125 140 L1125 190", "http", true); lab(1133, 170, "phone call");
+  path("M347 132 L347 148", "http"); path("M525 132 L525 148", "http"); path("M703 132 L703 148", "http");
+  path("M700 240 L700 248 L391 248 L391 256", "muted");
+  path("M786 420 L900 420 L900 330 L1000 330", "ws", true); lab(906, 322, "audio + text");
+  path("M786 436 L930 436 L930 435 L1000 435", "llm", true); lab(930, 428, "JSON");
+  path("M786 504 L1000 520", "db", true); lab(850, 498, "SQL");
+  path("M800 640 L980 640 L980 556 L1000 556", "db", true);
+  path("M800 705 L1265 705 L1265 120 L1250 120", "http"); lab(900, 699, "scheduler asks Twilio to place the call (REST)");
+  path("M786 650 L800 650", "muted");
+
+  /* ======================= tables ======================= */
+  var MODS = [
+    ["Accounts<br><code>accounts.py</code>", "Sign-up (checks the email, hashes the password with scrypt), login (issues a random cookie token), logout, phone-number normalisation (<code>9384...</code> becomes <code>+91...</code>).", ["accounts", "caregivers", "auth_sessions"], ["accounts", "auth_sessions"]],
+    ["Onboarding + dashboard<br><code>onboarding.py</code>", "Adds a parent with meal times, medicines and routines; creates one-off reminders; pauses or resumes calling; builds the whole dashboard snapshot in one read.", ["parents", "parent_caregiver", "meal_profile", "medicines", "routines", "reminders", "call_attempts", "events"], ["almost every table"]],
+    ["Phone adapters<br><code>twilio_api.py</code>, <code>bridge.py</code>, <code>gather.py</code>", "Verifies Twilio's signature or the per-call token, builds the TwiML instructions, places calls through Twilio's REST API, runs the live-audio WebSocket or the turn-by-turn webhooks, moves the call through its states.", ["call_attempts", "events"], ["call_attempts"]],
+    ["Agent runtime<br><code>session.py</code>, <code>converse.py</code>, <code>guardrails.py</code>, <code>context.py</code>", "One session per call. Builds the facts for the call, runs the LangGraph graph on every parent sentence, keeps the conversation history, applies the emergency check, length and leak filters, the loop guard and the \"ask before booking\" rule.", ["transcript_turns", "events"], ["parents", "routines", "medicines", "reminders", "meal_profile"]],
+    ["Tool registry<br><code>db_tools.py</code>, <code>tools.py</code>", "The only code that changes data on the agent's behalf. Checks tool name, scope, arguments and the parent's real words, runs the write, returns the result to the model and writes an audit event.", ["meal_logs", "medicine_logs", "reminder_acks", "alerts", "callbacks", "reminders", "routines", "call_attempts", "events"], ["call_attempts", "parents", "meal_profile"]],
+    ["Post-call<br><code>post_call.py</code>, <code>postcall_agent.py</code>, <code>outcome.py</code>, <code>notify.py</code>", "After a call ends: writes the summary and anomalies, writes caregiver notifications (console only today), and decides what the call was and the next attempt.", ["call_summaries", "notifications", "call_attempts", "callbacks", "events"], ["transcript_turns", "meal_logs", "medicine_logs", "alerts"]],
+    ["External clients<br><code>gnani_speech.py</code>, <code>audio.py</code>, <code>llm/</code>", "Thin connection code. Opens the Gnani speech WebSocket, requests Gnani voice audio, converts mu-law and PCM, sends the chat request to the LLM. No models are run here.", [], []],
+    ["Tracing<br><code>tracing.py</code>", "Creates one Langfuse trace per call with spans per node and turn, named by parent and call.", [], []],
+    ["Data layer<br><code>db.py</code>, <code>models.py</code>", "The pooled connection to PostgreSQL, the one-transaction-per-block helper, and the definitions of all 20 tables.", ["creates tables at start"], []],
+    ["Planner<br><code>planner.py</code> (scheduler program)", "Each hour, and right after onboarding, computes each routine's time for the parent's day and inserts one scheduled call per routine, once.", ["call_attempts"], ["parents", "routines", "meal_profile", "medicines", "reminders"]],
+    ["Dispatcher + reaper<br><code>scheduler.py</code>", "Every 10 s: finds due calls (<code>FOR UPDATE SKIP LOCKED</code>), cancels, postpones or sets <code>dialing</code> and commits, then asks Twilio to ring. Fails calls that never reported back.", ["call_attempts", "events"], ["call_attempts", "parents"]],
+    ["Outcome engine<br><code>outcome.py</code>", "Rules plus an LLM judge classify a finished call and create the next attempt: retry, call-back, or nothing.", ["call_attempts", "callbacks", "events"], ["call_attempts", "transcript_turns"]]
+  ];
+  var chip = function (t, k) { return '<span class="pill ' + k + '">' + esc(t) + "</span>"; };
+  $("mods").innerHTML = MODS.map(function (m) {
+    return "<tr><td>" + m[0] + "</td><td>" + m[1] + "</td><td>" + (m[2].map(function (t) { return chip(t, "w"); }).join("") || "<span class='pill'>none</span>") + "</td><td>" + (m[3].map(function (t) { return chip(t, "r"); }).join("") || "<span class='pill'>none</span>") + "</td></tr>";
+  }).join("");
+
+  var STOR = [
+    ["Accounts, parents, routines, meals, medicines, reminders", "PostgreSQL <code>carecall</code>", "Permanent", "<code>parents.id=2, calling_enabled=true</code>"],
+    ["Every call, its state, schedule and keys", "PostgreSQL: <code>call_attempts</code>", "Permanent", "<code>id=19, status=completed, key=...:a1</code>"],
+    ["What was said on the phone", "PostgreSQL: <code>transcript_turns</code>", "Permanent", "<code>#3 parent: \"No, can you remind me in 2 minutes?\"</code>"],
+    ["Meals eaten, medicines taken, with the parent's words", "PostgreSQL: <code>meal_logs</code>, <code>medicine_logs</code>", "Permanent", "<code>not_taken, source: \"No\"</code>"],
+    ["Alerts and messages for the family", "PostgreSQL: <code>alerts</code>, <code>notifications</code>", "Permanent", "<code>info: message for Sree: ...</code>"],
+    ["Audit trail of everything", "PostgreSQL: <code>events</code> (append-only)", "Permanent", "<code>db_tool.book_callback {...}</code>"],
+    ["Traces: spans, model inputs and outputs per call", "Langfuse (its own Postgres, ClickHouse, Redis, MinIO)", "Until deleted", "Trace <code>8dbb52f3...</code> for call 19"],
+    ["The conversation memory while a call runs", "RAM of the serve process (LangGraph)", "Until the call ends or the server restarts", "message list under <code>call-19</code>"],
+    ["Phone-mode sessions and slow replies in flight", "RAM of the serve process", "Until the call ends or restart", "session object for call 13"],
+    ["Settings and secrets", "The <code>.env</code> file, read at process start", "Permanent, edit then restart", "<code>TWILIO_FROM_NUMBER</code>"],
+    ["Server activity", "<code>logs/carecall.log</code> and the console", "Rotated at 5 MB", "<code>dialing call 20</code>"],
+    ["The caregiver's login", "Browser cookie <code>cc_session</code> (random token; only its SHA-256 is in the database)", "14 days", "n/a"]
+  ];
+  $("stor").innerHTML = STOR.map(function (r) { return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td><td>" + r[2] + "</td><td>" + r[3] + "</td></tr>"; }).join("");
+
+  var TABS = [
+    ["accounts", "A caregiver's login: email, password hash, which caregiver record it owns", "Accounts module", 1],
+    ["auth_sessions", "Logged-in browsers (hash of the cookie token, expiry)", "Accounts module", 0],
+    ["caregivers", "The family member who gets reports: name, phone, alert mode", "Accounts module", 4],
+    ["parents", "The person who is called: names, phone, language, time zone, consent time, calling on or off", "Onboarding", 3],
+    ["parent_caregiver", "Links a parent to the caregiver who looks after them", "Onboarding", 3],
+    ["meal_profile", "Meal times; only rows with source <code>caregiver</code> move the schedule", "Onboarding, admin route", 9],
+    ["medicines", "Name, dose, before/after/with food, which meal it is tied to", "Onboarding", 1],
+    ["reminders", "One-off reminders: message and due time", "Onboarding, <code>add_reminder</code> tool", 4],
+    ["routines", "What to call about: meal check-in, medicine reminder, one-off reminder", "Onboarding, reminders", 16],
+    ["call_attempts", "Every call, planned or made: status, kind, attempt number, schedule, Twilio id, keys, outcome", "Planner, dispatcher, phone adapters, tool registry, outcome engine", 22],
+    ["transcript_turns", "Each sentence of each call, who said it", "Agent runtime", 44],
+    ["call_summaries", "A short summary and anomaly list per call", "Post-call", 6],
+    ["callbacks", "A promise made on a call to call back, and its delay", "Tool registry (<code>book_callback</code>)", 4],
+    ["meal_logs", "What was eaten, with the exact words and a confidence", "Tool registry (<code>log_meal</code>)", 3],
+    ["medicine_logs", "Taken, not taken or unclear, with the exact words", "Tool registry (<code>log_medicine</code>)", 2],
+    ["reminder_acks", "Whether a one-off reminder was heard", "Tool registry (<code>ack_reminder</code>)", 0],
+    ["alerts", "Emergency, warning or info items, including messages relayed to the family", "Tool registry (<code>raise_alert</code>, <code>relay_message</code>)", 1],
+    ["notifications", "What was addressed to a caregiver (printed to the console today)", "Post-call, <code>notify_caregiver</code> tool", 9],
+    ["events", "Append-only audit trail with a JSON payload", "Everything", 167],
+    ["test_notes", "LLM-written notes on test runs", "Test tooling", 0]
+  ];
+  $("tabs").innerHTML = TABS.map(function (t) { return "<tr><td class='nw'><code>" + t[0] + "</code></td><td>" + t[1] + "</td><td>" + t[2] + "</td><td class='nw'>" + t[3] + "</td></tr>"; }).join("");
+
+  /* ======================= actions ======================= */
+  function fmt(o) {
+    var ks = Object.keys(o), w = Math.max.apply(null, ks.map(function (k) { return k.length; }));
+    return ks.map(function (k) { var v = o[k]; return k + " ".repeat(w - k.length) + " = " + (typeof v === "string" ? '"' + v + '"' : JSON.stringify(v)); }).join("\n");
+  }
+  var ACTS = [
+    { id: "C1", who: "Caregiver", title: "Create an account", sub: "Opens the dashboard, picks Create account, enters name, email and password",
+      trigger: "Submit the sign-up form", path: ["dashboard.html", "POST /auth/signup", "api.py auth_signup", "accounts.signup()", "accounts.login()"],
+      writes: [["caregivers", { id: 2, name: "Sree", phone: "", alert_mode: "immediate" }], ["accounts", { id: 1, email: "caregiver@example.com", password_hash: "scrypt$<16-byte salt>$<32-byte hash>", caregiver_id: 2 }],
+               ["auth_sessions", { account_id: 1, token_hash: "sha256 of the cookie token (64 hex chars)", expires_at: "2026-11-03 (14 days)" }]],
+      reads: ["accounts"], sees: "The page switches to the onboarding form. The browser holds an HttpOnly cookie <code>cc_session</code>.",
+      notes: "The password is never stored, only a salted scrypt hash. The caregiver's phone is not asked for, so it stays empty." },
+    { id: "C2", who: "Caregiver", title: "Log in or out", sub: "Returns later, or ends the session",
+      trigger: "Submit the login form, or press Log out", path: ["POST /auth/login or /auth/logout", "accounts.login() or logout()"],
+      writes: [["auth_sessions", { account_id: 1, token_hash: "sha256 of a fresh token", expires_at: "now + 14 days" }]], reads: ["accounts", "auth_sessions"],
+      sees: "Straight into the dashboard. Logging out deletes the session row, so the cookie stops working.", notes: "A wrong password gives the same message and takes the same time as an unknown email." },
+    { id: "C3", who: "Caregiver", title: "Add a parent (onboarding)", sub: "Enters the parent's name, phone, time zone, meal times, medicines and confirms consent",
+      trigger: "Submit the onboarding form", path: ["POST /api/onboarding", "api.py", "onboarding.onboard_parent()", "planner.plan_day()"],
+      writes: [["parents", { id: 2, name: "Sree (test parent)", preferred_name: "Sree", phone: "+91xxxxxxxxxx", language: "en", timezone: "Asia/Kolkata", consent_given_at: "2026-10-20 10:44", calling_enabled: true }],
+               ["parent_caregiver", { parent_id: 2, caregiver_id: 2, relationship: "child" }],
+               ["meal_profile (one row per meal)", { parent_id: 2, meal_type: "dinner", usual_time: "19:30", source: "caregiver" }],
+               ["medicines (if any added)", { id: 3, parent_id: 2, name: "tablet", dose_note: "", timing: "any", meal_anchor: "lunch", offset_minutes: 0 }],
+               ["routines (one per meal and medicine)", { id: 11, parent_id: 2, key: "dinner_checkin", type: "meal_checkin", config: { meal_type: "dinner" } }],
+               ["call_attempts (today's planned calls)", { id: 7, parent_id: 2, routine_id: 11, status: "scheduled", kind: "scheduled", attempt_no: 1, scheduled_at: "2026-10-20 20:00 IST", channel: "twilio", idempotency_key: "2:dinner_checkin:2026-10-20:s1:a1" }],
+               ["events", { type: "onboarding.parent_created", payload: { parent_id: 2, meals: { breakfast: "08:30", lunch: "12:30", dinner: "19:30" }, medicines: 0 } }]],
+      reads: ["parent_caregiver (is this phone already added?)", "meal_profile"], sees: "The dashboard appears with the parent, their routines and today's remaining calls.",
+      notes: "The dinner check-in is 20:00 because it fires 30 minutes after the 19:30 meal. A time already past by more than 10 minutes is skipped. A phone typed as 10 digits becomes <code>+91...</code>." },
+    { id: "C4", who: "Caregiver", title: "Schedule a one-off reminder or a test call", sub: "Types a message and \"call in N minutes\" (or a date and time)",
+      trigger: "Press Call in this many minutes", path: ["POST /api/parents/2/reminders", "onboarding.add_reminder()", "service.schedule_attempt()"],
+      writes: [["reminders", { id: 5, parent_id: 2, message: "You have a doctor's appointment at 4 PM today.", due_at: "2026-10-20 05:23:27Z", ack_required: true }],
+               ["routines", { id: 15, parent_id: 2, key: "reminder_5", type: "defined_reminder", config: { reminder_id: 5 } }],
+               ["call_attempts", { id: 13, routine_id: 15, status: "scheduled", kind: "scheduled", attempt_no: 1, scheduled_at: "2026-10-20 05:23:27Z", idempotency_key: "2:reminder_5:2026-10-20:s1:a1", occurrence_key: "2:reminder_5:2026-10-20:s1" }],
+               ["events", { call_id: 13, type: "dashboard.reminder_added", payload: { reminder_id: 5, by_caregiver: 2 } }]],
+      reads: ["parents (does this caregiver own it?)"], sees: "A new row appears on the calendar with a countdown. The scheduler dials it up to 10 s after its time.", notes: "A past time is refused. If calls are paused the row is created and then cancelled by the dispatcher." },
+    { id: "C5", who: "Caregiver", title: "Pause or resume calls", sub: "Presses Pause calls on the dashboard",
+      trigger: "Button on the dashboard", path: ["POST /api/parents/2/calling?enabled=false", "onboarding.set_calling()", "outcome.cancel_pending()"],
+      writes: [["parents", { id: 2, calling_enabled: false }], ["call_attempts (each waiting call)", { id: 7, status: "cancelled" }], ["events", { type: "dashboard.calling_paused", payload: { parent_id: 2, cancelled_waiting_calls: 2 } }]],
+      reads: ["call_attempts"], sees: "The calendar empties; the card says Calls are paused.", notes: "Resuming turns the flag back on and re-plans the day." },
+    { id: "C6", who: "Caregiver", title: "Watch the dashboard", sub: "Leaves it open during a call",
+      trigger: "The page polls every 2 seconds", path: ["GET /api/dashboard", "onboarding.snapshot()"],
+      writes: [], reads: ["parents", "meal_profile", "routines", "medicines", "reminders", "call_attempts", "transcript_turns", "meal_logs", "medicine_logs", "alerts", "callbacks", "events"],
+      sees: "Next-call countdown, calendar, live transcript, what the agent logged with quotes, call-backs, and an activity log. A new call-back flashes into the calendar.", notes: "Read-only. Notifications are not shown (see the gaps)." },
+    { id: "P1", who: "Parent", title: "Answers the phone", sub: "Picks up a call from the app",
+      trigger: "Twilio reports the call answered", path: ["Twilio status webhook", "api.py twilio_status", "state.transition()", "POST /twilio/voice", "session.open()"],
+      writes: [["call_attempts", { id: 19, status: "in_progress", started_at: "11:23:14", dialed_at: "11:23:07", twilio_sid: "CA614a...", channel: "twilio" }],
+               ["events", { type: "state.changed", payload: { from: "ringing", to: "in_progress", reason: "twilio:in-progress" } }], ["events", { type: "call.opened", payload: { routine: "tablet_3_reminder", agent: "converse", attempt_no: 1, kind: "scheduled" } }],
+               ["transcript_turns (the scripted opening)", { call_id: 19, turn_no: 2, speaker: "agent", text: "It is time for your tablet. Have you taken it?" }]],
+      reads: ["parents", "routines", "medicines"], sees: "Hears the opening, spoken by Twilio's voice (trial mode) or Gnani's (live-audio mode).", notes: "The opening is scripted code, not the LLM, so it starts instantly." },
+    { id: "P2", who: "Parent", title: "Says what they ate", sub: "\"I had a pancake\", then \"dinner\"",
+      trigger: "A speech turn", path: ["Twilio posts the text (or Gnani STT returns it)", "converse.py agent node", "LLM", "tools node", "db_tools.log_meal"],
+      writes: [["meal_logs", { id: 3, parent_id: 2, call_id: 21, meal_type: "dinner", status: "eaten", items: ["pancake"], source_utterance: "dinner", confidence: 0.9 }],
+               ["transcript_turns", { call_id: 21, turn_no: 5, speaker: "parent", text: "as i a pancake" }], ["events", { type: "db_tool.log_meal", payload: { ok: true } }]],
+      reads: ["transcript (the quote must appear in what they said)"], sees: "The agent thanks them; the dashboard facts panel shows the meal with the quote.",
+      notes: "A log is refused if its quote is not in what the parent actually said. The speech recogniser wrote \"as i a pancake\", and that is what is stored." },
+    { id: "P3", who: "Parent", title: "Says whether they took a medicine", sub: "\"No\" or \"No, I haven't taken my tablet\"",
+      trigger: "A speech turn", path: ["converse.py", "LLM", "db_tools.log_medicine"],
+      writes: [["medicine_logs", { id: 1, parent_id: 2, call_id: 19, medicine_id: 3, status: "not_taken", source_utterance: "No", confidence: 0.9 }], ["events", { type: "db_tool.log_medicine", payload: { medicine_id: 3, status: "not_taken", evidence: "No" } }]],
+      reads: ["medicines"], sees: "The facts panel shows medicine #3: not taken.", notes: "The status values are taken, not_taken and unclear." },
+    { id: "P4", who: "Parent", title: "Asks to be reminded again", sub: "\"Can you remind me in 2 minutes?\"",
+      trigger: "A speech turn", path: ["converse.py", "LLM names book_callback", "db_tools.book_callback", "service.schedule_attempt()"],
+      writes: [["call_attempts (the new call)", { id: 20, parent_id: 2, routine_id: 24, status: "scheduled", kind: "callback", attempt_no: 2, prev_attempt_id: 19, scheduled_at: "2026-10-20 05:55:31Z (11:25:31 IST)", idempotency_key: "2:tablet_3_reminder:2026-10-20:s1:cb2" }],
+               ["callbacks", { id: 3, parent_id: 2, call_id: 19, routine_id: 24, delay_minutes: 2, reason: "Medicine reminder", status: "scheduled" }], ["events", { type: "db_tool.book_callback", payload: { ok: true, call_id: 20, at_local: "11:25" } }]],
+      reads: ["parents (calls on?)", "call_attempts (cap, next reminder)"], sees: "The calendar shows the call-back immediately, before the call even ends. The scheduler dials it at 11:25:31.",
+      notes: "Refused with a reason code if it falls in quiet hours, after the next planned call, past the attempt cap, or calls are off. If the draft reply ends with a question, the booking is held until they answer." },
+    { id: "P5", who: "Parent", title: "Asks to change a reminder", sub: "\"Can you change it to 5 pm?\"",
+      trigger: "A speech turn", path: ["converse.py", "LLM", "relay_message and later book_callback"],
+      writes: [["alerts", { id: 1, parent_id: 2, call_id: 13, severity: "info", reason: "message for Sree: \"Please change the doctor's appointment to 5:00 p.m.\"", source_utterance: "Please change the doctor's appointment to 5:00 p.m." }], ["events", { type: "db_tool.relay_message", payload: { ok: true } }]],
+      reads: [], sees: "The agent says it cannot change a fixed appointment but can remind them again at a time of their choice. The relayed request shows in the facts panel.", notes: "The reminder itself is never edited; the family decides." },
+    { id: "P6", who: "Parent", title: "Says something that sounds like an emergency", sub: "For example, \"I fell down and my chest hurts\" (illustration, not from our data)",
+      trigger: "A speech turn", path: ["converse.py safety node (a pattern check, before the LLM)", "escalate node", "raise_alert"],
+      writes: [["alerts", { severity: "emergency", reason: "Parent reported a fall and chest pain", source_utterance: "I fell down and my chest hurts" }], ["notifications", { kind: "alert", body: "Sree: ...", sent_at: "(console only)" }], ["call_attempts", { status: "completed", end_reason: "emergency" }]],
+      reads: [], sees: "The agent says help is being informed and ends the call.", notes: "This path does not wait for the model or any question. The family notification is printed to the console today; see the gaps." },
+    { id: "P7", who: "Parent", title: "Says nothing", sub: "Three silences in a row",
+      trigger: "Silence timer fires (7 s in live-audio mode, or Twilio hears nothing)", path: ["converse.py safety node", "give_up node"],
+      writes: [["medicine_logs or meal_logs or reminder_acks", { status: "unclear / acknowledged false" }], ["alerts", { severity: "warning", reason: "Sree did not respond on the call" }], ["call_attempts", { status: "completed", end_reason: "completed" }]],
+      reads: [], sees: "The agent says it cannot hear them and will try again later.", notes: "The call still records what it can, so the schedule continues." },
+    { id: "P8", who: "Parent", title: "Hangs up, or does not pick up", sub: "Call 13 was cut off; call 14 rang with no answer",
+      trigger: "Twilio status webhooks", path: ["POST /twilio/status", "gather or bridge finishes the session", "post_call", "outcome.apply()"],
+      writes: [["call_attempts", { id: 13, status: "abandoned", outcome: "cut_off" }], ["call_attempts (the retry)", { id: 14, kind: "retry", attempt_no: 2, scheduled_at: "now", idempotency_key: "2:reminder_5:2026-10-20:s1:a2" }],
+               ["call_attempts", { id: 14, status: "no_answer", outcome: "never_connected" }], ["events", { type: "outcome.decided", payload: { outcome: "never_connected", reason: "no answer after 2 attempts" } }]],
+      reads: ["transcript_turns"], sees: "A cut-off call is retried at once; an unanswered one is retried once more, then the system moves on.", notes: "Two attempts per reminder is the cap." },
+    { id: "P9", who: "Parent", title: "Asks for something outside the job", sub: "A story, the weather, a recipe",
+      trigger: "A speech turn", path: ["converse.py", "LLM declines in one sentence"],
+      writes: [["transcript_turns", { speaker: "parent", text: "tell me a story" }, ], ["events", { type: "converse.step", payload: { say: "I can only help with your reminders and your meals.", actions: [] } }]],
+      reads: [], sees: "A short refusal and a return to the reminder.", notes: "Nothing is logged or alerted. Exceptions that go to the family: emergencies, medical questions, loneliness, scams." },
+    { id: "P10", who: "Parent", title: "Asks a medical question", sub: "\"Which tablet should I take for a headache?\"",
+      trigger: "A speech turn", path: ["converse.py", "LLM", "raise_alert"],
+      writes: [["alerts", { severity: "warning", reason: "Parent asked which tablet to take for a headache", source_utterance: "I have a headache, which tablet should I take?" }]],
+      reads: [], sees: "\"That is a question for your doctor or pharmacist.\"", notes: "On a past run the cheaper model sometimes forgot the alert; the current model did not on the guardrail set." },
+    { id: "S1", who: "System", title: "Plans the day", sub: "Every hour and after onboarding",
+      trigger: "The scheduler loop", path: ["scheduler_loop", "planner.plan_day()"], writes: [["call_attempts", { status: "scheduled", scheduled_at: "meal time + 30 min (check-in)", idempotency_key: "<parent>:<routine>:<date>:s1:a1" }]],
+      reads: ["parents", "routines", "meal_profile", "medicines", "reminders"], sees: "New rows on the calendar.", notes: "Idempotent: running it twice creates nothing new." },
+    { id: "S2", who: "System", title: "Dials a due call", sub: "The moment a scheduled time arrives",
+      trigger: "The dispatcher tick (every 10 s)", path: ["scheduler.dispatch_once()", "state.transition(dialing)", "commit", "twilio_api.place_call()"],
+      writes: [["call_attempts", { id: 19, status: "dialing", dialed_at: "11:23:07" }], ["call_attempts", { id: 19, twilio_sid: "CA614a..." }], ["events", { type: "dispatch.placed", payload: { twilio_sid: "CA614a..." } }]],
+      reads: ["call_attempts", "parents"], sees: "The call moves to dialing, then ringing.", notes: "The row is committed as dialing before Twilio is asked, so no second worker can dial it." },
+    { id: "S3", who: "System", title: "Cleans up stuck calls", sub: "Lost webhooks must never lock a parent out",
+      trigger: "The dispatcher tick", path: ["scheduler.reap_stale()"], writes: [["call_attempts", { status: "failed", end_reason: "stale: no status after dialing" }]], reads: ["call_attempts"],
+      sees: "Calls stuck in dialing or ringing for 180 s, or in progress for 25 minutes, become failed and are retried.", notes: "Observed once: a dial that Twilio refused became a technical failure and a retry 5 minutes later." },
+    { id: "S4", who: "System", title: "Finishes a call", sub: "Summary, notifications and the next call",
+      trigger: "The session ends", path: ["session.finish()", "post_call.run_post_call()", "outcome.apply()"],
+      writes: [["call_summaries", { call_id: 19, summary_text: "Sree: tablet: not taken. Will call again in 2 min (Medicine reminder).", anomalies: ["medicine not taken"], review_flag: false }],
+               ["notifications", { id: 7, caregiver_id: 2, call_id: 19, kind: "alert", body: "Sree: tablet: not taken. Will call again in 2 min (Medicine reminder).", sent_at: "11:23:34" }],
+               ["call_attempts", { id: 19, status: "completed", outcome: "callback_requested", end_reason: "callback" }], ["events", { type: "followup.already_scheduled", payload: { next_call_id: 20, booked: "live, during the call" } }]],
+      reads: ["transcript_turns", "medicine_logs", "meal_logs", "alerts"], sees: "The call moves to Recent calls with its result.", notes: "The call-back was already booked live, so the outcome engine finds it and does not duplicate it." },
+    { id: "O1", who: "Operator", title: "Set a parent's meal times", sub: "Local-only admin route (a caregiver screen for this does not exist yet)",
+      trigger: "PUT /admin/parents/2/meal-times {\"lunch\": \"13:00\"}", path: ["api.py (admin guard)", "db_tools.update_meal_time (admin scope)"],
+      writes: [["meal_profile", { parent_id: 2, meal_type: "lunch", usual_time: "13:00", source: "caregiver" }], ["events", { type: "db_tool.update_meal_time", payload: { ok: true } }]],
+      reads: ["meal_profile"], sees: "Calls follow the new time from the next planned day.", notes: "Refused for requests that arrive through the tunnel unless an admin token is set." }
+  ];
+  var tbl = function (t, kind) { return '<span class="pill ' + kind + '">' + esc(t) + "</span>"; };
+  function card(a) {
+    var rows = a.writes.map(function (w) { return '<div class="row"><div>' + esc(w[0]) + "</div><pre>" + esc(fmt(w[1])) + "</pre></div>"; }).join("");
+    var chips = a.writes.map(function (w) { return tbl(String(w[0]).split(" ")[0], "w"); }).join("") + a.reads.map(function (r) { return tbl(String(r).split(" ")[0], "r"); }).join("");
+    return '<details class="act" data-who="' + a.who + '"><summary><span class="aid ' + a.who + '">' + a.id + '</span><span class="atitle">' + esc(a.title) + "</span>" + chips + '<span class="asub">' + esc(a.sub) + "</span></summary>" +
+      '<div class="abody"><h5>Trigger</h5><div>' + esc(a.trigger) + "</div><h5>Path through the system</h5><div class=\"path\">" + a.path.map(function (p, i) { return (i ? '<span class="a">&rarr;</span>' : "") + '<span class="s">' + esc(p) + "</span>"; }).join("") + "</div>" +
+      "<h5>Rows written" + (a.writes.length ? "" : " (none)") + "</h5>" + rows + "<h5>Tables read</h5><div>" + (a.reads.length ? a.reads.map(function (r) { return esc(r); }).join(", ") : "none") + "</div>" +
+      "<h5>What the user sees</h5><div>" + a.sees + "</div><h5>Good to know</h5><div>" + a.notes + "</div></div></details>";
+  }
+  $("acts").innerHTML = ACTS.map(card).join("");
+  var WHO = ["All", "Caregiver", "Parent", "System", "Operator"], cur = "All";
+  $("filters").innerHTML = WHO.map(function (w) { return '<button type="button" data-w="' + w + '"' + (w === "All" ? ' class="on"' : "") + ">" + w + "</button>"; }).join("") +
+    '<button type="button" id="openall">Open all</button><button type="button" id="closeall">Close all</button>';
+  function apply() {
+    document.querySelectorAll("#filters [data-w]").forEach(function (b) { b.classList.toggle("on", b.dataset.w === cur); });
+    document.querySelectorAll("details.act").forEach(function (e) { e.hidden = !(cur === "All" || e.dataset.who === cur); });
+  }
+  $("filters").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.w) { cur = b.dataset.w; apply(); }
+    if (b.id === "openall") document.querySelectorAll("details.act:not([hidden])").forEach(function (x) { x.open = true; });
+    if (b.id === "closeall") document.querySelectorAll("details.act").forEach(function (x) { x.open = false; });
+  });
+
+  /* ======================= timeline ======================= */
+  var TL = [
+    ["11:21:44", "A one-off call for a new medicine (\"tablet\") is set up for 11:23", "<code>medicines</code> id 3; <code>routines</code> id 24 (<code>tablet_3_reminder</code>); <code>call_attempts</code> id 19 (scheduled, key <code>...:a1</code>); <code>events</code> manual.medicine_call_added"],
+    ["11:23:07", "The dispatcher finds call 19 due, commits \"dialing\", asks Twilio to ring", "<code>call_attempts</code> 19: status dialing, dialed_at; <code>events</code> state.changed; then twilio_sid saved and <code>events</code> dispatch.placed"],
+    ["11:23:10-14", "Ringing, then you answer. The session opens and the scripted opening is spoken", "<code>call_attempts</code> 19: ringing, in_progress, started_at; <code>events</code> call.opened, context.built; <code>transcript_turns</code> #1 and #2 (agent)"],
+    ["11:23:31", "You say \"No, can you remind me in 2 minutes?\". The model answers with two actions", "<code>transcript_turns</code> #3 (parent); <code>events</code> converse.step (the model's JSON)"],
+    ["11:23:31", "Tool 1: log_medicine. Tool 2: book_callback in 2 minutes", "<code>medicine_logs</code> id 1 (not_taken, \"No\"); <code>call_attempts</code> id 20 (callback, attempt 2, key <code>...:cb2</code>, 11:25:31); <code>callbacks</code> id 3; <code>events</code> db_tool.log_medicine, db_tool.book_callback"],
+    ["11:23:33", "The model is called again with the tool results and replies \"I will call you again at eleven twenty-five\", ending the call", "<code>transcript_turns</code> #4 (filler) and #5; <code>events</code> converse.step (iteration 1)"],
+    ["11:23:34", "Call finished. Summary, notification and outcome", "<code>call_attempts</code> 19: completed, outcome callback_requested; <code>call_summaries</code> 19; <code>notifications</code> id 7; <code>events</code> call.finished, post_call.done, outcome.decided, followup.already_scheduled"],
+    ["11:25:39", "Call 20 is dialed (8 s after its booked 11:25:31) and answered at 11:25:44", "<code>call_attempts</code> 20: dialing, ringing, in_progress; <code>events</code> dispatch.placed"],
+    ["11:26:29", "You say \"No, I haven't taken my tablet\". The agent picks 10 minutes itself", "<code>medicine_logs</code> id 2; <code>call_attempts</code> id 21 (cb3, 11:36:29); <code>callbacks</code> id 4; <code>notifications</code> id 8"],
+    ["11:26:33", "Call 20 completed, callback_requested", "<code>call_attempts</code> 20; <code>call_summaries</code> 20"],
+    ["11:36:32-37", "Call 21 is dialed and answered. See the gap note about what it said", "<code>call_attempts</code> 21; <code>transcript_turns</code> (8 turns); <code>meal_logs</code> id 3 (dinner, pancake); <code>call_summaries</code> 21; <code>notifications</code> id 9"]
+  ];
+  $("timeline").innerHTML = TL.map(function (r) { return "<tr><td class='nw'>" + r[0] + "</td><td>" + r[1] + "</td><td>" + r[2] + "</td></tr>"; }).join("");
+
+  /* index highlight */
+  var links = [].slice.call(document.querySelectorAll("nav.index a"));
+  if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) links.forEach(function (a) { a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id); }); }); }, { rootMargin: "-20% 0px -70% 0px" });
+    links.forEach(function (a) { var s = document.querySelector(a.getAttribute("href")); if (s) io.observe(s); });
+  }
+})();
+</script>
+</body>
+</html>

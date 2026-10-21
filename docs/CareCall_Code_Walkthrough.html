@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CareCall Code Walkthrough</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky index, one reading column. Each file is a card; each scenario is a numbered flow where every step names the file and function that runs. */
+:root {
+  --bg: #f4f5f8; --panel: #ffffff; --fg: #18202e; --muted: #596478; --line: #d8dde6; --soft: #eceff4; --accent: #0f6e8c; --accent-soft: #dcedf3;
+  --c-accounts: #0f6e8c; --c-onboarding: #2f7d32; --c-bridge: #0b7a75; --c-gather: #b45309; --c-session: #6d4aa8; --c-converse: #b3306c; --c-post_call: #8a6d00; --c-db: #4b5a78; --c-api: #596478; --c-other: #7a8396;
+  --font: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif; --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11151c; --panel: #181e28; --fg: #e5e9f0; --muted: #96a2b6; --line: #2a3242; --soft: #212939; --accent: #55b6d3; --accent-soft: #17313b;
+  --c-accounts: #55b6d3; --c-onboarding: #7bd17f; --c-bridge: #4fd1c5; --c-gather: #f6ad55; --c-session: #b79cf0; --c-converse: #f08ab8; --c-post_call: #e6c34a; --c-db: #9aa9c8; --c-api: #96a2b6; --c-other: #8e99ad; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #11151c; --panel: #181e28; --fg: #e5e9f0; --muted: #96a2b6; --line: #2a3242; --soft: #212939; --accent: #55b6d3; --accent-soft: #17313b;
+  --c-accounts: #55b6d3; --c-onboarding: #7bd17f; --c-bridge: #4fd1c5; --c-gather: #f6ad55; --c-session: #b79cf0; --c-converse: #f08ab8; --c-post_call: #e6c34a; --c-db: #9aa9c8; --c-api: #96a2b6; --c-other: #8e99ad; color-scheme: dark; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.62 var(--font);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 64px; }
+.shell { max-width: 1260px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 40px; }
+nav.index { position: sticky; top: 0; align-self: start; max-height: 100vh; overflow-y: auto; padding: 28px 0; }
+nav.index b { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
+nav.index b:first-child { margin-top: 0; }
+nav.index a { display: block; padding: 3px 10px; margin-left: -10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13.5px; }
+nav.index a:hover, nav.index a.on { color: var(--fg); background: var(--soft); }
+main { min-width: 0; padding-top: 28px; }
+@media (max-width: 900px) {
+  .shell { display: block; }
+  nav.index { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; gap: 6px; overflow-x: auto; padding: 10px 0; background: var(--bg); max-height: none; border-bottom: 1px solid var(--line); }
+  nav.index b { display: none; } nav.index a { white-space: nowrap; margin: 0; }
+}
+h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 10px; text-wrap: balance; letter-spacing: -.01em; }
+h2 { font-size: 1.35rem; line-height: 1.25; margin: 52px 0 6px; padding-top: 20px; border-top: 1px solid var(--line); text-wrap: balance; }
+h2 small { display: block; font: 500 12px var(--mono); color: var(--accent); letter-spacing: .04em; margin-bottom: 4px; }
+h3 { font-size: 1.02rem; margin: 22px 0 6px; }
+p { margin: 8px 0; max-width: 80ch; } ul, ol { max-width: 84ch; padding-left: 1.25em; } li { margin: 3px 0; }
+.lede { font-size: 1.08rem; color: var(--muted); max-width: 74ch; }
+code { font: 500 .86em var(--mono); background: var(--soft); padding: 1px 5px; border-radius: 4px; word-break: break-word; }
+pre { background: var(--soft); border-radius: 8px; padding: 10px 12px; overflow-x: auto; font: 400 12.5px/1.55 var(--mono); margin: 8px 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); margin: 12px 0; }
+.card h4 { margin: 0 0 4px; font-size: .95rem; } .card p { margin: 4px 0; font-size: .92rem; color: var(--muted); }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; } th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: .03em; }
+th, td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; } tr:last-child td { border-bottom: 0; }
+.diagram { padding: 10px; } svg { display: block; width: 100%; height: auto; min-width: 820px; } svg text { font-family: var(--font); fill: var(--fg); }
+.chip { display: inline-block; font: 500 12px var(--mono); padding: 1px 8px; border-radius: 6px; color: var(--c, var(--c-other)); background: color-mix(in srgb, var(--c, var(--c-other)) 14%, var(--panel)); border: 1px solid color-mix(in srgb, var(--c, var(--c-other)) 35%, var(--panel)); white-space: nowrap; }
+.chip.accounts { --c: var(--c-accounts); } .chip.onboarding { --c: var(--c-onboarding); } .chip.bridge { --c: var(--c-bridge); } .chip.gather { --c: var(--c-gather); }
+.chip.session { --c: var(--c-session); } .chip.converse { --c: var(--c-converse); } .chip.post_call { --c: var(--c-post_call); } .chip.db { --c: var(--c-db); } .chip.api { --c: var(--c-api); } .chip.other { --c: var(--c-other); }
+.fcard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin: 16px 0; overflow: hidden; border-top: 4px solid var(--c); }
+.fcard header { padding: 14px 18px 4px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.fcard header h3 { margin: 0; font: 600 1.1rem var(--mono); } .fcard header span { color: var(--muted); font-size: .88rem; }
+.fcard .body { padding: 0 18px 16px; display: grid; gap: 2px; }
+.fcard h5 { margin: 12px 0 2px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.fcard .body > div, .fcard .body ul { margin: 0; font-size: .94rem; max-width: 90ch; }
+.fcard dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: .92rem; } .fcard dt { font: 500 12.5px var(--mono); } .fcard dd { margin: 0; color: var(--muted); }
+.accounts { --c: var(--c-accounts); } .onboarding { --c: var(--c-onboarding); } .bridge { --c: var(--c-bridge); } .gather { --c: var(--c-gather); }
+.session { --c: var(--c-session); } .converse { --c: var(--c-converse); } .post_call { --c: var(--c-post_call); } .db { --c: var(--c-db); }
+.flow { list-style: none; padding: 0; margin: 10px 0; counter-reset: s; max-width: none; border-left: 2px solid var(--line); margin-left: 12px; }
+.flow li { counter-increment: s; position: relative; padding: 6px 0 10px 26px; margin: 0; }
+.flow li::before { content: counter(s); position: absolute; left: -13px; top: 8px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 500 11px var(--mono); background: var(--panel); border: 2px solid var(--c, var(--c-other)); color: var(--fg); }
+.flow .fn { font: 500 12.5px var(--mono); margin-left: 6px; } .flow .tx { display: block; color: var(--muted); font-size: .92rem; margin-top: 2px; }
+.flow li.ind1 { margin-left: 22px; } .flow li.ind2 { margin-left: 44px; }
+.scn { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px 18px 12px; margin: 14px 0; }
+.scn h3 { margin: 14px 0 2px; } .scn .who { font: 500 12px var(--mono); color: var(--accent); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 8px 0; }
+.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; max-width: 84ch; }
+.callout.warn { border-color: #a76100; background: color-mix(in srgb, #a76100 12%, var(--panel)); }
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="index" aria-label="Sections">
+  <b>Start</b><a href="#map">How the files connect</a>
+  <b>The eight files</b><a href="#f-accounts">accounts.py</a><a href="#f-onboarding">onboarding.py</a><a href="#f-bridge">bridge.py</a><a href="#f-gather">gather.py</a><a href="#f-session">session.py</a><a href="#f-converse">converse.py</a><a href="#f-post_call">post_call.py</a><a href="#f-db">db.py</a>
+  <b>Deep dive</b><a href="#tools">How tools reach the model</a>
+  <b>Scenarios</b><a href="#scenarios">User flows</a><a href="#matrix">Who calls whom</a><a href="#stacks">Stacks used</a>
+</nav>
+<main>
+
+<header>
+  <h1>CareCall code walkthrough</h1>
+  <p class="lede">Eight files do most of the work. This page explains what each one holds, when it runs, what technology it uses, and how it helps the app, then follows real users through the app and shows which function in which file runs at each step.</p>
+  <div class="legend" id="legend"></div>
+</header>
+
+<section id="map">
+  <h2><small>THE BIG PICTURE</small>How the eight files connect</h2>
+  <p>Think of layers. A request arrives at <code>api.py</code> (not one of the eight; it is the doorway). It hands work to one of four files that deal with the outside world: <b>accounts</b> and <b>onboarding</b> for the caregiver's browser, <b>gather</b> or <b>bridge</b> for a phone call. Both phone files hand the conversation to <b>session</b>, which runs the <b>converse</b> graph and, when the call ends, <b>post_call</b>. Every file that stores or reads anything goes through <b>db</b>.</p>
+  <div class="scroll diagram"><svg id="map-svg" viewBox="0 0 1000 560" role="img" aria-labelledby="mt"><title id="mt">Layered map of the eight files</title></svg></div>
+  <p style="color:var(--muted);font-size:.9rem">Arrows point from the caller to the callee. Files not among the eight (<code>db_tools.py</code>, <code>planner.py</code>, <code>outcome.py</code>, <code>twilio_api.py</code>) appear in the scenarios where they matter.</p>
+</section>
+
+<section id="files">
+  <h2><small>THE EIGHT FILES</small>What each file is, when it runs, and why it matters</h2>
+
+  <article class="fcard accounts" id="f-accounts">
+    <header><h3>accounts.py</h3><span>109 lines · who is this caregiver?</span></header>
+    <div class="body">
+      <h5>When it runs</h5><div>Sign-up, login, logout, and on <b>every</b> request the dashboard makes (to work out whose data to show). Also whenever a phone number is typed anywhere.</div>
+      <h5>What is inside</h5>
+      <dl><dt>hash_password / check_password</dt><dd>Salted scrypt hashing and comparison. The password itself is never stored.</dd>
+          <dt>normalize_phone</dt><dd>Turns <code>98765 43210</code> into <code>+919876543210</code>. Twilio needs international format.</dd>
+          <dt>signup</dt><dd>Validates email, password length and name, creates a <code>Caregiver</code> and an <code>Account</code> in one transaction.</dd>
+          <dt>login</dt><dd>Checks the password, creates a random token, stores only its SHA-256 in <code>auth_sessions</code>, returns the token for the cookie.</dd>
+          <dt>account_for_token</dt><dd>Cookie token in, caregiver identity out (or nothing if expired or unknown). This is what protects every dashboard route.</dd>
+          <dt>logout</dt><dd>Deletes the session row.</dd></dl>
+      <h5>How it is used</h5><div>Called by <code>api.py</code> (<code>auth_signup</code>, <code>auth_login</code>, <code>auth_logout</code>, and the <code>_me()</code> helper that guards every <code>/api/*</code> route). <code>onboarding.py</code> borrows <code>normalize_phone</code> and <code>AuthError</code>. It opens database transactions through <code>db.session_scope</code>.</div>
+      <h5>Stack</h5><div>Python standard library only for the security parts (<code>hashlib.scrypt</code>, <code>hmac.compare_digest</code>, <code>secrets</code>, <code>re</code>), plus SQLAlchemy to read and write. It knows nothing about HTTP; FastAPI is in <code>api.py</code>.</div>
+      <h5>Why it helps the app</h5><div>Keeps each caregiver's parents private, keeps passwords safe even if the database leaks, and makes sure every phone number is dialable.</div>
+    </div>
+  </article>
+
+  <article class="fcard onboarding" id="f-onboarding">
+    <header><h3>onboarding.py</h3><span>213 lines · turn a form into a schedule, and the dashboard data</span></header>
+    <div class="body">
+      <h5>When it runs</h5><div>When a caregiver adds a parent, creates a one-off reminder, pauses or resumes calls, and every 2 seconds while the dashboard is open.</div>
+      <h5>What is inside</h5>
+      <dl><dt>onboard_parent</dt><dd>Validates everything, then in one transaction creates the parent, the caregiver link, meal times (marked as caregiver-set, so the schedule obeys them), medicines and routines. Then plans today's calls.</dd>
+          <dt>add_reminder</dt><dd>Creates a <code>Reminder</code>, a routine for it, and a scheduled call at the exact time (seconds included).</dd>
+          <dt>set_calling</dt><dd>Turns calling on or off for a parent; off also cancels every waiting call.</dd>
+          <dt>snapshot</dt><dd>Builds the whole dashboard in one read: routines with next call, the calendar, the live call and transcript, logged facts, call-backs and recent events.</dd>
+          <dt>_owned_parent</dt><dd>The ownership check used by the others: a caregiver can only touch their own parents.</dd></dl>
+      <h5>How it is used</h5><div>Called by the matching routes in <code>api.py</code>. It calls <code>accounts.normalize_phone</code>, <code>planner.plan_day</code> and <code>planner.fire_time</code> (when each routine fires), <code>service.schedule_attempt</code> (insert a call safely), <code>outcome.cancel_pending</code>, <code>tools.add_event</code> (audit trail) and <code>db.session_scope</code>.</div>
+      <h5>Stack</h5><div>SQLAlchemy queries and joins, <code>zoneinfo</code> and <code>datetime</code> for the parent's local time, regular expressions for validation. Plain functions with no web code, which is why they can be tested without starting a server.</div>
+      <h5>Why it helps the app</h5><div>It is the bridge between what a person types and what the scheduler needs. Without it there are no routines, so no calls would ever be planned. It also feeds the live view the caregiver watches.</div>
+    </div>
+  </article>
+
+  <article class="fcard bridge" id="f-bridge">
+    <header><h3>bridge.py</h3><span>183 lines · live two-way audio (stream mode)</span></header>
+    <div class="body">
+      <h5>When it runs</h5><div>Only in live-audio mode (<code>TWILIO_VOICE_MODE=stream</code>, needs a paid Twilio account). One <code>StreamBridge</code> exists for the whole length of each call.</div>
+      <h5>What is inside</h5>
+      <dl><dt>run</dt><dd>The receive loop. Reads Twilio's WebSocket messages: <code>start</code>, <code>media</code> (audio, forwarded to Gnani), <code>mark</code>, <code>stop</code>. Always calls <code>_cleanup</code> at the end.</dd>
+          <dt>_on_start</dt><dd>Checks the per-call token, creates the <code>CallSession</code>, starts the Gnani speech socket, launches the two background tasks, speaks the opening.</dd>
+          <dt>_speak</dt><dd>Text in, audio out: asks Gnani text-to-speech, converts to mu-law frames, sends each to Twilio, then sends a <code>mark</code>.</dd>
+          <dt>_pump</dt><dd>Reads Gnani's events. "Speech started" cancels the silence timer and interrupts the agent (barge-in). Final text goes to the inbox.</dd>
+          <dt>_consume</dt><dd>Takes each final transcript, runs the agent in a worker thread (<code>session.turn</code>), speaks the reply, ends the call when the agent is done.</dd>
+          <dt>_on_mark, _arm_silence, _silence</dt><dd>When Twilio says playback finished, start a 7 s timer; if nothing is said, feed an empty turn so the agent asks "are you still there?".</dd>
+          <dt>_cleanup</dt><dd>Stops tasks, closes Gnani, then calls <code>session.finish</code> so the call is always recorded.</dd></dl>
+      <h5>How it is used</h5><div><code>api.twilio_stream</code> accepts the WebSocket and runs one bridge. The bridge uses the Gnani clients (<code>gnani_speech.py</code>), the audio converters (<code>audio.py</code>) and <code>CallSession</code>.</div>
+      <h5>Stack</h5><div><code>asyncio</code> (tasks, a queue, an event), FastAPI's WebSocket object, JSON and base64, audio helpers for mu-law and resampling, <code>asyncio.to_thread</code> to run the blocking agent without freezing audio, and <code>run_coroutine_threadsafe</code> so a worker thread can make the agent say a filler line right away.</div>
+      <h5>Why it helps the app</h5><div>It is what makes the call feel live: the parent can interrupt, the voice starts within about 0.2 s, and long silences are handled. It keeps all audio details out of the agent.</div>
+    </div>
+  </article>
+
+  <article class="fcard gather" id="f-gather">
+    <header><h3>gather.py</h3><span>132 lines · turn-by-turn calls (trial mode)</span></header>
+    <div class="body">
+      <h5>When it runs</h5><div>In trial mode (<code>TWILIO_VOICE_MODE=gather</code>), which is what your real calls used. Once at the start of a call and once per parent sentence.</div>
+      <h5>What is inside</h5>
+      <dl><dt>GatherCalls.start</dt><dd>Creates the <code>CallSession</code>, opens it, and returns the opening as TwiML.</dd>
+          <dt>turn</dt><dd>Starts the agent on the parent's words in a worker thread and waits up to 3 s.</dd>
+          <dt>_collect / wait</dt><dd>If the agent is slow, tells Twilio "One moment" and to come back to <code>/twilio/wait</code>; repeats up to 6 times.</dd>
+          <dt>_answer</dt><dd>Logs what was heard and said; if the agent is done, schedules the finish.</dd>
+          <dt>_twiml, _wait_twiml</dt><dd>Builds Twilio's instructions: <code>&lt;Say&gt;</code> the reply inside a <code>&lt;Gather input="speech"&gt;</code>, or hang up.</dd>
+          <dt>_finish_later / _finish / ended</dt><dd>Run <code>session.finish</code> in the background so the hang-up is instant, and record a hang-up mid-call as abandoned.</dd>
+          <dt>_abandon_orphan</dt><dd>If a sentence arrives for a call whose session was lost (a restart), records the call as abandoned and has the outcome engine retry it at once.</dd></dl>
+      <h5>How it is used</h5><div>Called from four routes in <code>api.py</code>: <code>/twilio/voice</code>, <code>/twilio/turn</code>, <code>/twilio/wait</code> and <code>/twilio/status</code>. One shared object <code>CALLS</code> holds the in-memory sessions.</div>
+      <h5>Stack</h5><div>Twilio's TwiML builder (<code>VoiceResponse</code>, <code>Gather</code>), <code>asyncio</code> (<code>to_thread</code>, <code>create_task</code>, <code>wait_for</code>, <code>shield</code>), and the per-call HMAC token that goes into every URL.</div>
+      <h5>Why it helps the app</h5><div>Real phone calls work on a free Twilio trial. The same agent, tools and scheduling run behind it, so the scheduler and call-back logic could be tested on a real phone.</div>
+    </div>
+  </article>
+
+  <article class="fcard session" id="f-session">
+    <header><h3>session.py</h3><span>162 lines · one call's conversation, whatever the channel</span></header>
+    <div class="body">
+      <h5>When it runs</h5><div>Three times per call: <code>open</code> at the start, <code>turn</code> for every parent sentence, <code>finish</code> at the end. The same in both phone modes and in text tests.</div>
+      <h5>What is inside</h5>
+      <dl><dt>CallSession.__init__</dt><dd>Builds the agent for this call: the LLM client and the LangGraph graph from <code>converse.py</code>, a trace id, and the thread id <code>call-&lt;id&gt;</code> that keys the conversation memory.</dd>
+          <dt>open</dt><dd>Builds the call context, marks the call <code>in_progress</code>, runs the graph's opening, saves the agent's lines to <code>transcript_turns</code>, returns them.</dd>
+          <dt>turn</dt><dd>Saves the parent's words, runs the graph once, saves the reply, returns a <code>TurnResult</code> (lines to speak, done or not, end reason, latency).</dd>
+          <dt>finish</dt><dd>Marks the call <code>completed</code> or <code>abandoned</code>, writes <code>call.finished</code>, runs <code>post_call</code>, then <code>outcome.apply</code> to decide the next call.</dd>
+          <dt>_save_turn, _span, _user_id</dt><dd>Transcript rows, tracing spans, and the Langfuse user name.</dd></dl>
+      <h5>How it is used</h5><div>Created by <code>gather.start</code> or <code>bridge._on_start</code>. It calls <code>context.build_context</code>, <code>converse</code>'s graph, <code>state.transition</code>, <code>post_call.run_post_call</code> and <code>outcome.apply</code>.</div>
+      <h5>Stack</h5><div>LangGraph (a compiled graph invoked with a config holding the thread id, memory kept by <code>MemorySaver</code>), Langfuse spans through <code>tracing.py</code>, SQLAlchemy, and a dataclass for the result.</div>
+      <h5>Why it helps the app</h5><div>The phone files only move words in and out; all behaviour lives behind this one interface. That is why the agent can be tested with text and then used on a real phone unchanged.</div>
+    </div>
+  </article>
+
+  <article class="fcard converse" id="f-converse">
+    <header><h3>converse.py</h3><span>418 lines · the agent: memory, tools, guards</span></header>
+    <div class="body">
+      <h5>When it runs</h5><div>Every parent sentence. <code>session.turn</code> runs the graph once per sentence; inside, the model may be called up to 4 times (see the tool loop).</div>
+      <h5>What is inside</h5>
+      <dl><dt>system_prompt, task_text</dt><dd>Build the instructions for this call: the three jobs, scope rules, tool list, output format, and the job for this routine.</dd>
+          <dt>_llm_step, _normalise</dt><dd>One model call in JSON mode; parses and tidies the reply into <code>{say, actions, end_call}</code>, with one retry if the model did not return JSON.</dd>
+          <dt>build_conversation_graph</dt><dd>Defines seven nodes and how they connect: <code>open</code>, <code>safety</code>, <code>escalate</code>, <code>give_up</code>, <code>agent</code>, <code>tools</code>, <code>finish</code>.</dd>
+          <dt>open_</dt><dd>The scripted greeting and routine question (no LLM). Only when the previous attempt was cut off mid-conversation does one model call continue it.</dd>
+          <dt>safety</dt><dd>Appends the parent's words to memory, checks emergency patterns, counts silences.</dd>
+          <dt>agent</dt><dd>One model step; drops commitments (book_callback, add_reminder) if the draft ends with a question.</dd>
+          <dt>run_tools</dt><dd>Runs the requested actions through the tool registry, speaks a filler while a slow one runs, feeds results back to the model.</dd>
+          <dt>finish</dt><dd>Caps length at 60 words, blocks leaks, stops repeated lines, builds the final reply and end reason.</dd>
+          <dt>_trim, _said_before, _hold_for_answer</dt><dd>Keep the last 40 messages, detect a line said three times, hold promises behind a question.</dd></dl>
+      <h5>How it is used</h5><div>Never called directly: <code>session.py</code> builds the graph and invokes it. It calls <code>db_tools.call_tool</code> for every action and <code>db_tools.tools_text</code> to describe the tools to the model.</div>
+      <h5>Stack</h5><div>LangGraph (<code>StateGraph</code> with conditional edges, <code>MemorySaver</code>), a <code>TypedDict</code> as the shared state, Pydantic for the call context, an HTTPS JSON-mode call to the LLM, regular expressions for the emergency and leak checks, and a Langfuse decorator on each node.</div>
+      <h5>Why it helps the app</h5><div>It is the part that actually talks to the parent and decides what to do, while code keeps the guarantees (emergency, quote evidence, no unconfirmed bookings).</div>
+    </div>
+  </article>
+
+  <article class="fcard post_call" id="f-post_call">
+    <header><h3>post_call.py</h3><span>91 lines · the report after every call</span></header>
+    <div class="body">
+      <h5>When it runs</h5><div>Once after every call, from <code>session.finish</code>, whether the call completed, was cut off or failed.</div>
+      <h5>What is inside</h5>
+      <dl><dt>run_post_call</dt><dd>Reads everything logged for the call (meals, medicines, acknowledgements, alerts, call-backs), writes a one-line-per-fact summary, finds anomalies (medicine not taken, a meal skipped two days running, an alert), flags calls for review, saves a <code>CallSummary</code>, and creates a <code>Notification</code> for each caregiver.</dd>
+          <dt>_meal_line</dt><dd>Formats one meal log as readable text.</dd></dl>
+      <h5>How it is used</h5><div><code>session.finish</code> calls it inside a Langfuse span. It uses the notifier from <code>notify.py</code> (prints to the console today, or Twilio SMS if switched on). After it, <code>outcome.apply</code> decides the next call.</div>
+      <h5>Stack</h5><div>SQLAlchemy queries and a few date calculations. No model call; the next-step decision is made by <code>outcome.py</code>.</div>
+      <h5>Why it helps the app</h5><div>The caregiver gets a readable summary instead of a transcript, and unusual things are highlighted. The summary is also what the outcome engine uses to decide what happens next.</div>
+    </div>
+  </article>
+
+  <article class="fcard db" id="f-db">
+    <header><h3>db.py</h3><span>71 lines · the connection to PostgreSQL</span></header>
+    <div class="body">
+      <h5>When it runs</h5><div>Every time any code touches the database, in both programs. <code>init_db</code> once at start-up.</div>
+      <h5>What is inside</h5>
+      <dl><dt>init_db</dt><dd>Builds the engine (a pool of connections to the database named in <code>DATABASE_URL</code>) and creates any missing tables.</dd>
+          <dt>session_scope</dt><dd>A <code>with</code> block that gives you a database session, commits if the block finishes and rolls back if it raises. Everything inside is one transaction.</dd>
+          <dt>is_postgres, is_initialized</dt><dd>Small checks (for example, to know whether row locks are available).</dd></dl>
+      <h5>How it is used</h5><div>Imported by essentially every file here. It does not run a database; the database is PostgreSQL in Docker, and this file only connects to it.</div>
+      <h5>Stack</h5><div>SQLAlchemy (engine, connection pool, <code>sessionmaker</code>), the <code>psycopg</code> driver for PostgreSQL, <code>contextlib.contextmanager</code>, with a SQLite file fallback for tests and quick demos.</div>
+      <h5>Why it helps the app</h5><div>One safe way to read and write: an error part-way never leaves half-saved data, and many calls can use the database at the same time through the pool.</div>
+    </div>
+  </article>
+</section>
+
+<section id="tools">
+  <h2><small>YOU ASKED ABOUT THIS</small>How the tools are exposed to the model</h2>
+  <p>A "tool" is a Python function the model is allowed to ask for (log a meal, book a call-back). The model cannot run code. It can only write a request, and our code decides whether to run it. Here is the whole path for <code>book_callback</code>.</p>
+  <ol class="flow" id="toolflow"></ol>
+  <h3>The prompt line the model reads</h3>
+  <pre>- book_callback(in_minutes: int?, at: str?, reason: str?): Book a call back to THIS parent about the reminder in progress,
+  in N minutes or at a parent-local time (e.g. '16:15'). Booking again during the same call moves the existing booking.</pre>
+  <p>That line is generated, not typed by hand: <code>db_tools.tools_text(CONVERSE_TOOLS)</code> reads each tool's name, argument types and description from the registry, so adding a tool to the registry and to the allow-list is enough for the model to know about it.</p>
+  <h3>What the model writes, and what comes back</h3>
+  <pre>model  -&gt;  {"say": null, "actions": [{"tool": "book_callback", "args": {"in_minutes": 2}}], "end_call": false}
+code   -&gt;  TOOL RESULTS: [{"tool": "book_callback", "ok": true, "at_local": "11:25", "spoken": "eleven twenty-five", "call_id": 20}]
+model  -&gt;  {"say": "All right, I will call you again at eleven twenty-five.", "actions": [], "end_call": true}</pre>
+  <div class="callout"><b>Why not the model provider's built-in tool calling?</b> The registry can also produce that format (<code>openai_tool_specs</code>), but the live agent does not use it. It uses plain text descriptions and a JSON reply instead, so one format works for the spoken words, the actions and the end of the call, and it works with any model. The price: the model can write an action that is wrong, so every request passes through <code>call_tool</code>, which checks the tool name, scope, argument names and types, refuses a <code>parent_id</code> argument (the call supplies it), turns every error into <code>{ok:false}</code>, and writes an audit event.</div>
+  <div class="callout warn"><b>Two safety layers on top.</b> <code>run_tools</code> only accepts names in <code>CONVERSE_TOOLS</code> (9 tools), so admin tools like <code>update_meal_time</code> are unreachable even if the model names them. And the logging tools check that the quoted words really appear in what the parent said.</div>
+</section>
+
+<section id="scenarios">
+  <h2><small>FOLLOW A USER THROUGH THE APP</small>What happens, step by step, for each thing a user can do</h2>
+  <p>Each step shows the file, the function that runs, and what it does. Coloured labels match the files above; grey labels are files outside the eight. Steps shown further in are called by the step above.</p>
+  <div id="scn"></div>
+</section>
+
+<section id="matrix">
+  <h2><small>CROSS-REFERENCE</small>Who calls whom</h2>
+  <div class="scroll"><table><thead><tr><th>File</th><th>Called by</th><th>Calls</th></tr></thead><tbody>
+    <tr><td><span class="chip accounts">accounts.py</span></td><td>api.py (sign-up, login, logout, every <code>/api</code> route through <code>_me</code>), onboarding.py (phone format)</td><td>db.py</td></tr>
+    <tr><td><span class="chip onboarding">onboarding.py</span></td><td>api.py (onboarding, reminders, calling, dashboard routes)</td><td>accounts.py, planner.py, service.py, outcome.py, tools.py, db.py</td></tr>
+    <tr><td><span class="chip gather">gather.py</span></td><td>api.py (<code>/twilio/voice</code>, <code>/turn</code>, <code>/wait</code>, <code>/status</code>)</td><td>session.py, twilio_api.py (token), llm/factory</td></tr>
+    <tr><td><span class="chip bridge">bridge.py</span></td><td>api.py (<code>/twilio/stream</code>)</td><td>session.py, Gnani STT and TTS clients, audio.py, twilio_api.py (token)</td></tr>
+    <tr><td><span class="chip session">session.py</span></td><td>gather.py, bridge.py (and the text tests and CLI)</td><td>converse.py graph, context.py, state.py, post_call.py, outcome.py, tracing.py, db.py</td></tr>
+    <tr><td><span class="chip converse">converse.py</span></td><td>session.py</td><td>db_tools.py, guardrails.py, routines.py, llm client, tools.py, tracing.py</td></tr>
+    <tr><td><span class="chip post_call">post_call.py</span></td><td>session.py</td><td>notify.py, tools.py, db.py</td></tr>
+    <tr><td><span class="chip db">db.py</span></td><td>almost everything</td><td>SQLAlchemy and the database</td></tr>
+  </tbody></table></div>
+</section>
+
+<section id="stacks">
+  <h2><small>TECHNOLOGY</small>What each file is built with</h2>
+  <div class="scroll"><table><thead><tr><th>File</th><th>Main technologies</th><th>Nature of the code</th></tr></thead><tbody>
+    <tr><td><span class="chip accounts">accounts.py</span></td><td>hashlib.scrypt, hmac, secrets, regex, SQLAlchemy</td><td>Plain synchronous Python</td></tr>
+    <tr><td><span class="chip onboarding">onboarding.py</span></td><td>SQLAlchemy ORM, zoneinfo, datetime, regex</td><td>Plain synchronous Python</td></tr>
+    <tr><td><span class="chip bridge">bridge.py</span></td><td>asyncio, FastAPI WebSocket, JSON, base64, audio conversion, Gnani clients</td><td>Asynchronous, long-lived, with background tasks</td></tr>
+    <tr><td><span class="chip gather">gather.py</span></td><td>asyncio, Twilio TwiML builder, HMAC tokens</td><td>Asynchronous, short requests</td></tr>
+    <tr><td><span class="chip session">session.py</span></td><td>LangGraph, Langfuse, SQLAlchemy</td><td>Synchronous (runs in worker threads)</td></tr>
+    <tr><td><span class="chip converse">converse.py</span></td><td>LangGraph StateGraph, Pydantic, an LLM over HTTPS (JSON mode), regex</td><td>Synchronous graph nodes</td></tr>
+    <tr><td><span class="chip post_call">post_call.py</span></td><td>SQLAlchemy, notifier (console or Twilio SMS)</td><td>Plain synchronous Python</td></tr>
+    <tr><td><span class="chip db">db.py</span></td><td>SQLAlchemy engine and pool, psycopg, contextmanager</td><td>Infrastructure</td></tr>
+  </tbody></table></div>
+  <p>Why the split between synchronous and asynchronous: the web layer must serve many connections at once, so anything that waits (the model, the database, the agent) runs in a worker thread and never blocks it. That is the job of <code>asyncio.to_thread</code> in <code>bridge.py</code> and <code>gather.py</code>.</p>
+</section>
+
+</main>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); };
+  var FILES = { accounts: "accounts.py", onboarding: "onboarding.py", bridge: "bridge.py", gather: "gather.py", session: "session.py", converse: "converse.py", post_call: "post_call.py", db: "db.py" };
+  $("legend").innerHTML = Object.keys(FILES).map(function (k) { return '<span class="chip ' + k + '">' + FILES[k] + "</span>"; }).join("") + '<span class="chip other">other files</span>';
+
+  /* ---------- layered map ---------- */
+  var S = $("map-svg"), NS = "http://www.w3.org/2000/svg";
+  function mk(n, a, t) { var e = document.createElementNS(NS, n); for (var k in a) e.setAttribute(k, a[k]); if (t != null) e.textContent = t; S.appendChild(e); return e; }
+  var dm = document.createElementNS(NS, "defs"), mm = document.createElementNS(NS, "marker");
+  mm.setAttribute("id", "ah"); mm.setAttribute("viewBox", "0 0 10 10"); mm.setAttribute("refX", "9"); mm.setAttribute("refY", "5"); mm.setAttribute("markerWidth", "7"); mm.setAttribute("markerHeight", "7"); mm.setAttribute("orient", "auto");
+  var pp = document.createElementNS(NS, "path"); pp.setAttribute("d", "M0 0 L10 5 L0 10 z"); pp.setAttribute("fill", "var(--muted)"); mm.appendChild(pp); dm.appendChild(mm); S.appendChild(dm);
+  function box(x, y, w, h, t1, t2, col, solid) {
+    mk("rect", { x: x, y: y, width: w, height: h, rx: 8, fill: "var(--panel)", stroke: col, "stroke-width": solid ? 2.2 : 1.3, "stroke-dasharray": solid ? "0" : "5 3" });
+    mk("text", { x: x + w / 2, y: y + 22, "font-size": 13.5, "font-weight": 600, "text-anchor": "middle", "font-family": "var(--mono)" }, t1);
+    if (t2) mk("text", { x: x + w / 2, y: y + 40, "font-size": 11, "text-anchor": "middle", style: "fill:var(--muted)" }, t2);
+  }
+  function ar(x1, y1, x2, y2) { mk("line", { x1: x1, y1: y1, x2: x2, y2: y2, stroke: "var(--muted)", "stroke-width": 1.6, "marker-end": "url(#ah)" }); }
+  function note(x, y, t) { mk("text", { x: x, y: y, "font-size": 10.8, style: "fill:var(--muted);paint-order:stroke;stroke:var(--panel);stroke-width:4px" }, t); }
+  var cv = function (k) { return "var(--c-" + k + ")"; };
+  box(60, 10, 200, 52, "Caregiver's browser", "dashboard.html", cv("other"), false);
+  box(300, 10, 200, 52, "Twilio", "webhooks, WebSocket", cv("other"), false);
+  box(540, 10, 200, 52, "Scheduler program", "dials due calls", cv("other"), false);
+  box(60, 100, 680, 52, "api.py", "FastAPI routes: the doorway (validates input, checks login, calls the right file)", cv("api"), true);
+  box(60, 195, 150, 62, "accounts.py", "who is this?", cv("accounts"), true);
+  box(230, 195, 150, 62, "onboarding.py", "forms to schedule", cv("onboarding"), true);
+  box(400, 195, 150, 62, "gather.py", "trial-mode calls", cv("gather"), true);
+  box(570, 195, 170, 62, "bridge.py", "live-audio calls", cv("bridge"), true);
+  box(400, 300, 340, 56, "session.py", "one call: open, turn, finish", cv("session"), true);
+  box(400, 395, 165, 62, "converse.py", "the agent graph", cv("converse"), true);
+  box(580, 395, 160, 62, "db_tools.py", "the tool registry", cv("other"), false);
+  box(770, 300, 210, 56, "post_call.py", "summary, notifications", cv("post_call"), true);
+  box(60, 495, 920, 52, "db.py", "connection and transactions to PostgreSQL (everything above writes through it)", cv("db"), true);
+  ar(160, 62, 160, 100); ar(400, 62, 400, 100); note(406, 84, "webhooks");
+  ar(135, 152, 135, 195); ar(305, 152, 305, 195); ar(475, 152, 475, 195); ar(655, 152, 655, 195);
+  ar(475, 257, 500, 300); ar(655, 257, 655, 300);
+  ar(530, 356, 500, 395); ar(565, 426, 580, 426);
+  ar(740, 328, 770, 328); note(742, 320, "finish");
+  ar(135, 257, 135, 495); ar(305, 257, 305, 495);
+  ar(660, 457, 660, 495); ar(875, 356, 875, 495);
+  mk("text", { x: 60, y: 574, "font-size": 11.5, style: "fill:var(--muted)" }, "Solid outline = one of the eight files. Dashed = outside the eight.");
+  S.setAttribute("viewBox", "0 0 1000 585");
+
+  /* ---------- scenarios ---------- */
+  var st = function (file, fn, tx, ind) { return { f: file, fn: fn, tx: tx, i: ind || 0 }; };
+  var TOOLFLOW = [
+    st("converse", "system_prompt()", "At the start of the call the prompt is built, including the generated tool list (see below).", 0),
+    st("converse", "agent node  ->  _llm_step()", "The model is called with the prompt and the conversation so far and returns the JSON with an <code>actions</code> list.", 0),
+    st("converse", "_hold_for_answer()", "If the draft says something ending in a question, any <code>book_callback</code> in the same reply is held back this turn.", 1),
+    st("converse", "run_tools node", "For each action: is the name in the allow-list? Then speak a filler (\"Umm... hold on a moment\") if the tool's answer matters.", 0),
+    st("other", "db_tools.call_tool()", "Checks the tool exists and is allowed here, rejects a <code>parent_id</code> argument, checks argument names and types.", 1),
+    st("other", "db_tools.book_callback()", "The real function: works out the time, applies quiet hours, the next-reminder rule and the attempt cap, inserts the call. A refusal comes back as a reason code plus alternatives.", 2),
+    st("other", "service.schedule_attempt()", "Inserts the new <code>call_attempts</code> row with its computed idempotency key (a repeat is a no-op).", 3),
+    st("db", "session_scope()", "Everything the tool wrote commits together, or none of it does.", 3),
+    st("converse", "run_tools node (again)", "The result is appended to memory as <code>TOOL RESULTS: [...]</code> and the graph loops back to <b>agent</b> (up to 4 steps).", 0),
+    st("converse", "agent node  ->  finish node", "The model now speaks, using the time the tool returned. <b>finish</b> applies the length, leak and repeat guards and builds the reply.", 0)
+  ];
+  var fl = function (steps) {
+    return steps.map(function (s) {
+      return '<li class="ind' + (s.i || 0) + '" style="--c: var(--c-' + (s.f === "other" || s.f === "api" ? (s.f === "api" ? "api" : "other") : s.f) + ')"><span class="chip ' + s.f + '">' + (FILES[s.f] || (s.f === "api" ? "api.py" : "other")) + '</span><span class="fn">' + esc(s.fn) + '</span><span class="tx">' + s.tx + "</span></li>";
+    }).join("");
+  };
+  $("toolflow").innerHTML = fl(TOOLFLOW);
+
+  var SC = [
+    { t: "1. A caregiver creates an account", w: "Caregiver · browser", intro: "Uses: accounts, db.",
+      steps: [
+        st("api", "dashboard.html: api('/auth/signup')", "The browser sends name, email and password as JSON."),
+        st("api", "api.py auth_signup()", "FastAPI checks the JSON against its schema, then hands over."),
+        st("accounts", "signup()", "Checks the email format, password length and name; refuses a duplicate email.", 1),
+        st("accounts", "hash_password()", "Salted scrypt hash of the password.", 2),
+        st("db", "session_scope()", "One transaction: a <code>Caregiver</code> row and an <code>Account</code> row.", 2),
+        st("accounts", "login()", "Checks the password again, makes a random token, stores only its SHA-256 as an <code>AuthSession</code>.", 1),
+        st("api", "api.py _set_cookie()", "Puts the token in an HttpOnly cookie. The page moves to onboarding."),
+        st("accounts", "account_for_token()", "On the next request (<code>/api/me</code>) the cookie is turned back into 'this is caregiver 2'.", 1)
+      ] },
+    { t: "2. The caregiver adds a parent", w: "Caregiver · browser", intro: "Uses: accounts, onboarding, db (plus the planner).",
+      steps: [
+        st("api", "dashboard.html: api('/api/onboarding')", "Form values (name, phone, meal times, medicines, consent) as JSON."),
+        st("accounts", "account_for_token() via _me()", "Who is asking? A missing or expired cookie stops here with a 401.", 1),
+        st("onboarding", "onboard_parent()", "The main function.", 1),
+        st("accounts", "normalize_phone()", "<code>9876543210</code> becomes <code>+919876543210</code>; nonsense is refused.", 2),
+        st("onboarding", "validation", "Meal times look like HH:MM, a medicine's meal has a time, consent is ticked, the phone is not already added.", 2),
+        st("db", "session_scope()", "One transaction: parent, link to the caregiver, meal times marked as caregiver-set, medicines, routines, an audit event.", 2),
+        st("other", "planner.plan_day()", "For each routine works out today's local time (meal time + 30 min, and so on) and inserts one scheduled call each, skipping times already past.", 2),
+        st("onboarding", "snapshot()", "The page then asks for the dashboard and shows the new parent with their upcoming calls.", 1)
+      ] },
+    { t: "3. The caregiver schedules a one-off reminder or a test call", w: "Caregiver · browser", intro: "Uses: accounts, onboarding, db.",
+      steps: [
+        st("api", "api('/api/parents/2/reminders')", "Message and 'in N minutes' or a date and time."),
+        st("onboarding", "add_reminder()", "Checks the caregiver owns the parent, the time is not in the past.", 1),
+        st("onboarding", "_owned_parent()", "Ownership check.", 2),
+        st("db", "session_scope()", "One transaction: <code>Reminder</code>, a routine for it, the call at the exact second, an audit event.", 2),
+        st("other", "service.schedule_attempt()", "Inserts the call with its idempotency key.", 2),
+        st("other", "scheduler.dispatch_once()", "The scheduler program, within 10 s of the due time, finds the call and dials it (see scenario 6).", 1)
+      ] },
+    { t: "4. The caregiver watches the dashboard", w: "Caregiver · browser, every 2 seconds", intro: "Uses: accounts, onboarding, db.",
+      steps: [
+        st("api", "api('/api/dashboard')", "A GET request, repeated every 2 s."),
+        st("accounts", "account_for_token()", "Whose data? Only this caregiver's parents.", 1),
+        st("onboarding", "snapshot()", "One read: parent, routines with next call, calendar, the live call and its transcript so far, logged facts with quotes, call-backs, recent events.", 1),
+        st("db", "session_scope()", "Read-only queries inside one session.", 2),
+        st("api", "dashboard.html: refresh()", "The page redraws. A call-back booked a second ago flashes into the calendar.")
+      ] },
+    { t: "5. The caregiver pauses calls", w: "Caregiver · browser", intro: "Uses: accounts, onboarding, db.",
+      steps: [
+        st("api", "api('/api/parents/2/calling?enabled=false')", "Pressing Pause calls."),
+        st("onboarding", "set_calling()", "Sets <code>calling_enabled</code> to false.", 1),
+        st("other", "outcome.cancel_pending()", "Marks every waiting call cancelled.", 2),
+        st("db", "session_scope()", "Parent flag, the cancellations and an audit event commit together.", 2),
+        st("other", "scheduler.dispatch_once()", "Anything that slips through is cancelled by the dispatcher because the parent is paused.", 1)
+      ] },
+    { t: "6. A scheduled call to the parent, in trial mode (what you have tested)", w: "Parent · phone, Twilio listens and speaks", intro: "Uses: gather, session, converse, post_call, db.",
+      steps: [
+        st("other", "scheduler.dispatch_once()", "Claims the due call (row lock), sets <code>dialing</code>, commits.", 0),
+        st("other", "twilio_api.place_call()", "Asks Twilio to ring, with the address <code>/twilio/voice?call_id=19&amp;t=token</code>.", 1),
+        st("api", "api.py twilio_status()", "Twilio reports ringing, then in-progress; the state machine moves the call.", 0),
+        st("api", "api.py twilio_voice()", "Parent answered. Twilio asks what to do. The token stands in for the missing signature.", 0),
+        st("gather", "GatherCalls.start()", "Creates the session and opens it.", 1),
+        st("session", "CallSession.__init__()", "Builds the LangGraph graph from converse.py and the LLM client.", 2),
+        st("session", "CallSession.open()", "Builds the call context, sets <code>in_progress</code>, runs the graph's opening.", 2),
+        st("converse", "open_ node", "Scripted greeting and the routine's first question (no LLM). Both lines saved to <code>transcript_turns</code>.", 3),
+        st("gather", "_twiml()", "Returns <code>&lt;Gather&gt;&lt;Say&gt;...&lt;/Say&gt;&lt;/Gather&gt;</code>. Twilio speaks it and listens.", 1),
+        st("api", "api.py twilio_turn()", "The parent spoke. Twilio's recogniser sends the text.", 0),
+        st("gather", "GatherCalls.turn()", "Runs <code>session.turn</code> in a worker thread; waits up to 3 s.", 1),
+        st("session", "CallSession.turn()", "Saves the parent's words, runs the graph, saves the reply.", 2),
+        st("converse", "safety, agent, run_tools, finish nodes", "The loop in scenario 8 below. Output: the lines to speak and whether the call is done.", 3),
+        st("gather", "_answer() / _twiml()", "Back to Twilio as the next <code>&lt;Say&gt;</code> plus <code>&lt;Gather&gt;</code>, or a hang-up if done. Repeats from the 'parent spoke' step.", 1),
+        st("session", "CallSession.finish()", "When done (or after a hang-up): completed or abandoned, audit event.", 1),
+        st("post_call", "run_post_call()", "Summary, anomalies, notifications.", 2),
+        st("other", "outcome.apply()", "Decides what the call was and creates the next call if needed.", 2)
+      ] },
+    { t: "7. The same call in live-audio mode (paid Twilio)", w: "Parent · phone, Twilio carries audio, Gnani listens and speaks", intro: "Uses: bridge, session, converse, post_call, db.",
+      steps: [
+        st("other", "dispatch_once, place_call, twilio_status", "Same as scenario 6 until the parent answers.", 0),
+        st("api", "api.py twilio_voice()", "Returns <code>&lt;Connect&gt;&lt;Stream&gt;</code> telling Twilio to open a WebSocket.", 0),
+        st("api", "api.py twilio_stream()", "Accepts the WebSocket and creates one <code>StreamBridge</code>.", 0),
+        st("bridge", "run()", "Reads Twilio's messages until the call ends.", 1),
+        st("bridge", "_on_start()", "Verifies the token, creates <code>CallSession</code>, opens the Gnani speech socket, starts <code>_pump</code> and <code>_consume</code>, runs <code>session.open</code>.", 2),
+        st("session", "CallSession.open()", "Same as scenario 6.", 3),
+        st("bridge", "_speak()", "Opening text, Gnani text-to-speech, mu-law frames to Twilio, then a mark.", 2),
+        st("bridge", "run(): media event", "Parent audio from Twilio, converted and forwarded to Gnani speech-to-text.", 1),
+        st("bridge", "_pump()", "Gnani says 'speech started' (cancels the silence timer, interrupts the agent if it is talking), then sends the final text.", 2),
+        st("bridge", "_consume()", "Runs <code>session.turn</code> in a worker thread.", 2),
+        st("session", "CallSession.turn()", "Agent loop (scenario 8). While a slow tool runs, <code>speak_now</code> makes the bridge say a filler immediately.", 3),
+        st("bridge", "_speak()", "Reply audio streamed back in 20 ms frames, about 0.2 s after Gnani starts.", 2),
+        st("bridge", "_cleanup()", "On hang-up or the agent's goodbye: stops tasks, closes Gnani, calls <code>session.finish</code>.", 1),
+        st("session", "finish()  ->  run_post_call()  ->  outcome.apply()", "Same as scenario 6.", 2)
+      ] },
+    { t: "8. The parent says \"remind me in 2 minutes\" (the agent loop and the tools)", w: "Parent · phone", intro: "Uses: session, converse, db_tools, db.",
+      steps: [
+        st("session", "CallSession.turn(\"No, can you remind me in 2 minutes?\")", "Saves the parent's line to <code>transcript_turns</code> and runs the graph once."),
+        st("converse", "safety node", "Adds the sentence to memory; the emergency pattern check finds nothing; counts it as not silence.", 1),
+        st("converse", "agent node", "Model call 1. Reply: log_medicine (not taken, quote \"No\") and book_callback (in 2 minutes), <code>say</code> empty.", 1),
+        st("converse", "run_tools node", "A filler line is spoken; both actions run through <code>call_tool</code>.", 1),
+        st("other", "log_medicine, book_callback", "Rows written: <code>medicine_logs</code>, a new <code>call_attempts</code> call-back and a <code>callbacks</code> row. The dashboard shows it at once.", 2),
+        st("converse", "agent node (again)", "Model call 2 with the tool results. Reply: \"All right, I will call you again at eleven twenty-five\", end call.", 1),
+        st("converse", "finish node", "Caps and filters the reply and sets the end reason <code>callback</code>.", 1),
+        st("session", "TurnResult returned", "The phone file speaks it. Then <code>finish</code> and <code>post_call</code> run, and the already-booked call-back is recognised, not duplicated.", 1)
+      ] },
+    { t: "9. The parent says something that sounds like an emergency", w: "Parent · phone", intro: "Uses: session, converse, db.",
+      steps: [
+        st("session", "CallSession.turn()", "Runs the graph."),
+        st("converse", "safety node", "A pattern check (not the model) matches words such as a fall or chest pain.", 1),
+        st("converse", "escalate node", "Raises an emergency alert, writes the reply that help is being informed, ends the call. The model is not consulted.", 1),
+        st("post_call", "run_post_call()", "Summary marked URGENT; a notification is written for the caregiver.", 1)
+      ] },
+    { t: "10. The parent says nothing, three times", w: "Parent · phone", intro: "Uses: bridge or gather, session, converse.",
+      steps: [
+        st("bridge", "_silence()", "Live-audio mode: after 7 s of quiet an empty turn is fed in. In trial mode Twilio's listen window times out and posts an empty result.", 0),
+        st("converse", "safety node", "Counts the silences.", 1),
+        st("converse", "agent node", "First and second silence: the agent gently asks again.", 1),
+        st("converse", "give_up node", "Third silence: records what it can (acknowledged false, or medicine or meal unclear), raises a warning, says goodbye and ends the call.", 1)
+      ] },
+    { t: "11. The parent interrupts the agent (live-audio mode only)", w: "Parent · phone", intro: "Uses: bridge.",
+      steps: [
+        st("bridge", "_speak()", "The agent is playing a long reply.", 0),
+        st("bridge", "_pump()", "Gnani's speech socket reports 'speech started'.", 1),
+        st("bridge", "_pump()", "Sets playing to false and sends Twilio a <code>clear</code> message, which stops playback.", 1),
+        st("bridge", "_on_mark()", "Does not restart the silence timer while the parent is still speaking.", 1),
+        st("bridge", "_consume()", "When the final text arrives it becomes the next turn.", 1)
+      ] },
+    { t: "12. The parent hangs up, or never answers", w: "Parent · phone", intro: "Uses: gather or bridge, session, post_call, db.",
+      steps: [
+        st("api", "api.py twilio_status()", "Twilio reports <code>completed</code> (or busy, no-answer, failed)."),
+        st("gather", "ended()  /  bridge _cleanup()", "Trial mode records the hang-up as abandoned; live-audio mode notices the socket closed.", 1),
+        st("session", "CallSession.finish(abandoned)", "Status <code>abandoned</code>; anything already logged during the call (a meal, a medicine) stays recorded.", 1),
+        st("post_call", "run_post_call()", "Summary says 'Call ended early'; flags it for review.", 2),
+        st("other", "outcome.apply()", "The LLM judge reads the transcript: cut off mid-sentence means an immediate retry; never connected means a retry later, then it gives up (2 attempts).", 2),
+        st("db", "session_scope()", "The retry is a new row with the next attempt key, created once even if this step runs twice.", 2)
+      ] }
+  ];
+  $("scn").innerHTML = SC.map(function (s) {
+    return '<div class="scn"><h3>' + esc(s.t) + '</h3><div class="who">' + esc(s.w) + " · " + esc(s.intro) + '</div><ol class="flow">' + fl(s.steps) + "</ol></div>";
+  }).join("");
+
+  var links = [].slice.call(document.querySelectorAll("nav.index a"));
+  if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) links.forEach(function (a) { a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id); }); }); }, { rootMargin: "-20% 0px -70% 0px" });
+    links.forEach(function (a) { var s = document.querySelector(a.getAttribute("href")); if (s) io.observe(s); });
+  }
+})();
+</script>
+</body>
+</html>

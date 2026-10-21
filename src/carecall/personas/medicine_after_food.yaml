@@ -1,0 +1,67 @@
+# Use case: medicine_after_food (Amlodipine, after dinner). One question: step id "taken".
+
+- id: ma_compliant_vimala
+  usecase: medicine_after_food
+  routine: amlodipine_reminder
+  name: Vimala, 70
+  profile: Respectful, formal. Took the tablet right after dinner.
+  traits: [formal, compliant]
+  truth: {taken: true}
+  lines:
+    taken: ["Yes madam, I took it after dinner."]
+  expect:
+    end_reason: completed
+    medicine_logs: [{medicine: Amlodipine, status: taken}]
+    alerts: []
+
+- id: ma_sleepy_babu
+  usecase: medicine_after_food
+  routine: amlodipine_reminder
+  name: Babu, 76
+  profile: Already in bed, drowsy. Has not taken it, will later.
+  traits: [sleepy, mumbling]
+  truth: {taken: false}
+  lines:
+    taken: ["Not yet, I am very sleepy. I will take it later."]
+  expect:
+    end_reason: callback
+    medicine_logs: [{medicine: Amlodipine, status: not_taken}]
+    callbacks: [{delay_minutes: 10}]
+
+- id: ma_double_dose_lalitha
+  usecase: medicine_after_food
+  routine: amlodipine_reminder
+  name: Lalitha, 72
+  profile: Took the tablet earlier in the evening and now wonders if she should take another. Possible double dose, a safety issue. Wants advice.
+  traits: [anxious, seeks_advice]
+  truth: {taken: true_earlier, considering_second_dose: true}
+  lines:
+    taken: ["I took it already in the evening. Shall I take another one now?", "Okay, I will not take it. I will ask the doctor."]
+  expect:
+    alerts_include: [{severity: warning}]
+
+- id: ma_hinglish_shanta
+  usecase: medicine_after_food
+  routine: amlodipine_reminder
+  name: Shanta, 74
+  profile: Speaks Hindi mixed with English. Took the tablet. The agent must understand code-mixed speech.
+  traits: [hinglish, warm]
+  truth: {taken: true}
+  lines:
+    taken: ["Haan, abhi abhi khana khaya aur goli bhi le li."]
+  expect:
+    end_reason: completed
+    medicine_logs: [{medicine: Amlodipine, status: taken}]
+
+- id: ma_distracted_dinesh
+  usecase: medicine_after_food
+  routine: amlodipine_reminder
+  name: Dinesh, 78
+  profile: Watching a cricket match, does not hear the question the first time, then answers properly.
+  traits: [distracted, noisy_background]
+  truth: {taken: true}
+  lines:
+    taken: ["Hmm? Oh, the match is on. What did you say?", "Yes yes, I have taken it."]
+  expect:
+    end_reason: completed
+    medicine_logs: [{medicine: Amlodipine, status: taken}]

@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Anatomy of a Call</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Anatomy of a Call. Layout: a vertical trace rail, one card per step; lanes (parent, model, code, spoken) carry the colour.
+   Tokens: ground and ink in blue-leaning neutrals; four lane hues; semantic good/bad used sparingly. */
+:root {
+  --bg: #f4f5f8; --surface: #ffffff; --ink: #151a22; --muted: #596273; --line: #dde1e9; --code-bg: #eef0f5;
+  --parent: #0e7a6e; --parent-t: #e0f3f0;
+  --model: #5a3fd1; --model-t: #ece8fc;
+  --code: #a65a06; --code-t: #fbeed9;
+  --spoken: #3b4658; --spoken-t: #e8ecf2;
+  --bad: #b3261e; --bad-t: #fde8e6;
+  --tk: #1d4ed8; --ts: #0b6b5f; --tn: #a65a06; --tb: #9d1c57;
+  --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d1119; --surface: #151b26; --ink: #e8ebf1; --muted: #9ba5b5; --line: #2a3345; --code-bg: #0f1520;
+  --parent: #4fd1be; --parent-t: #10312e; --model: #a99bff; --model-t: #221c4a; --code: #f0b45c; --code-t: #3a2a10; --spoken: #b7c2d4; --spoken-t: #1f2735;
+  --bad: #ff8d84; --bad-t: #3d1816; --tk: #8ab4ff; --ts: #5fd9c7; --tn: #f0b45c; --tb: #ff9ac4; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0d1119; --surface: #151b26; --ink: #e8ebf1; --muted: #9ba5b5; --line: #2a3345; --code-bg: #0f1520;
+  --parent: #4fd1be; --parent-t: #10312e; --model: #a99bff; --model-t: #221c4a; --code: #f0b45c; --code-t: #3a2a10; --spoken: #b7c2d4; --spoken-t: #1f2735;
+  --bad: #ff8d84; --bad-t: #3d1816; --tk: #8ab4ff; --ts: #5fd9c7; --tn: #f0b45c; --tb: #ff9ac4; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 16px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 64px; }
+.wrap { max-width: 860px; margin: 0 auto; }
+h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(30px, 6vw, 46px); line-height: 1.08; font-weight: 600; letter-spacing: -.02em; }
+h2 { font-size: 24px; font-weight: 600; letter-spacing: -.01em; margin-top: 56px; }
+h3 { font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 36px 0 12px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+h3 .tm { font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 13px; }
+h4 { font-size: 16px; font-weight: 600; }
+p { margin: 0 0 10px; }
+code { font-family: var(--mono); font-size: .86em; background: var(--code-bg); padding: .1em .35em; border-radius: 4px; overflow-wrap: anywhere; }
+.sub { max-width: 62ch; color: var(--muted); font-size: 18px; margin: 14px 0 22px; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; padding: 0; list-style: none; }
+.facts li { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 14px; }
+.facts b { font-variant-numeric: tabular-nums; }
+
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-top: 18px; }
+.legend > div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.legend .chip { margin-bottom: 6px; }
+.fields { width: 100%; border-collapse: collapse; margin: 14px 0 0; font-size: 15px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: block; overflow-x: auto; }
+.fields tbody { display: table; width: 100%; min-width: 520px; }
+.fields td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.fields tr:last-child td { border-bottom: 0; }
+.fields td:first-child { font-family: var(--mono); font-size: 14px; white-space: nowrap; }
+
+.chip { display: inline-block; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; }
+.chip-parent { background: var(--parent-t); color: var(--parent); } .chip-model { background: var(--model-t); color: var(--model); }
+.chip-code { background: var(--code-t); color: var(--code); } .chip-spoken { background: var(--spoken-t); color: var(--spoken); }
+
+.timeline { display: flex; flex-direction: column; }
+.step { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 0 12px; }
+.rail { position: relative; display: flex; justify-content: center; }
+.rail::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: var(--line); transform: translateX(-50%); }
+.dot { position: relative; z-index: 1; margin-top: 16px; width: 30px; height: 30px; border-radius: 50%; background: var(--surface); border: 2px solid var(--line);
+  display: grid; place-items: center; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.lane-parent .dot { border-color: var(--parent); color: var(--parent); } .lane-model .dot { border-color: var(--model); color: var(--model); }
+.lane-code .dot { border-color: var(--code); color: var(--code); } .lane-spoken .dot { border-color: var(--spoken); color: var(--spoken); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 14px; min-width: 0; }
+.card-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.card-h .meta { color: var(--muted); font-size: 13.5px; flex: 1 1 160px; }
+.card-b { padding: 14px 16px 6px; min-width: 0; }
+.lead { color: var(--muted); }
+.small { font-size: 14px; color: var(--muted); }
+.say { padding: 9px 14px; border-radius: 14px; margin: 0 0 8px; max-width: 62ch; }
+.say-parent { background: var(--parent-t); color: var(--ink); border-bottom-left-radius: 4px; }
+.say-agent { background: var(--spoken-t); color: var(--ink); border-bottom-left-radius: 4px; }
+
+.mem { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.mem-n { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mem-n::after { content: " msgs"; }
+.mem-cells { display: inline-flex; gap: 3px; }
+.mem-cells i { width: 9px; height: 15px; border-radius: 2px; display: block; background: var(--parent); opacity: .55; }
+.mem-cells i.a { background: var(--model); }
+.mem-cells i.new { opacity: 1; outline: 2px solid var(--ink); outline-offset: 1px; }
+
+.jwrap { margin: 6px 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); overflow: hidden; }
+.blabel { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 6px 12px; border-bottom: 1px solid var(--line); }
+pre.json { margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.k { color: var(--tk); } .s { color: var(--ts); } .n { color: var(--tn); } .b { color: var(--tb); }
+.note { background: var(--code-t); border-radius: 8px; padding: 10px 14px; font-size: 14.5px; margin: 0 0 12px; }
+.note b { color: var(--code); }
+.ticks { margin: 0 0 12px; padding-left: 20px; font-size: 15px; } .ticks li { margin-bottom: 6px; }
+
+.turnbox { margin-top: 8px; }
+.memtable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; margin-top: 14px; }
+.memtable { min-width: 640px; } .memtable td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.memtable tr:last-child td { border-bottom: 0; }
+.num { font-variant-numeric: tabular-nums; color: var(--muted); width: 34px; } .when { color: var(--muted); white-space: nowrap; }
+.txt { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.role { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; } .role-user { background: var(--parent-t); color: var(--parent); } .role-assistant { background: var(--model-t); color: var(--model); }
+.after { margin: 0 0 14px; padding-left: 22px; } .after li { margin-bottom: 8px; }
+.db { display: grid; gap: 8px; } .db > div { display: flex; flex-wrap: wrap; gap: 4px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.dbk { font-family: var(--mono); font-size: 13px; color: var(--code); min-width: 150px; } .dbv { color: var(--ink); font-size: 14.5px; flex: 1 1 240px; }
+
+.pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.mini { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px 4px; min-width: 0; }
+.mini-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; } .mini-h .meta { color: var(--muted); font-size: 13.5px; }
+@media (min-width: 760px) { .pair { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.take { display: grid; gap: 10px; padding: 0; margin: 14px 0 0; list-style: none; counter-reset: t; }
+.take li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 14px 52px; position: relative; }
+.take li::before { counter-increment: t; content: counter(t); position: absolute; left: 16px; top: 13px; width: 24px; height: 24px; border-radius: 50%; background: var(--model-t); color: var(--model); font-weight: 600; font-size: 13px; display: grid; place-items: center; }
+footer { margin-top: 48px; color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--line); padding-top: 14px; }
+@media (max-width: 520px) { .step { grid-template-columns: 30px minmax(0, 1fr); gap: 0 8px; } .dot { width: 26px; height: 26px; font-size: 12px; } .mem { margin-left: 0; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style></head><body>
+<div class="wrap">
+<header>
+  <h1>Anatomy of a Call</h1>
+  <p class="sub">A real lunch check-in with the live model: every message the model saw, every JSON it returned, and what the code did in between.</p>
+  <ul class="facts">
+    <li><b>2</b> parent turns</li><li><b>4</b> model calls</li><li><b>≈7.5 s</b> of model and tool time</li>
+    <li><b>10</b> messages in memory by the end</li><li><b>1</b> meal logged, <b>1</b> call-back booked</li>
+  </ul>
+  <div class="legend">
+    <div><span class="chip chip-parent">Parent</span><br>What the speech service heard.</div>
+    <div><span class="chip chip-model">Model</span><br>One JSON object per call. It proposes; it never acts.</div>
+    <div><span class="chip chip-code">Code</span><br>Validates, runs tools, writes the database.</div>
+    <div><span class="chip chip-spoken">Spoken</span><br>What reaches the parent's ear.</div>
+  </div>
+</header>
+
+<h2>What the model returns</h2>
+<p class="sub" style="font-size:16px;margin-top:8px">Always one JSON object with three fields. Nothing happens because the model wrote it; the code reads each field and decides.</p>
+<div class="fields"><table style="border-collapse:collapse;width:100%;min-width:520px"><tbody>
+<tr><td>say</td><td>The words to speak, or <code>null</code>. Capped, filtered, then sent to text-to-speech.</td></tr>
+<tr><td>actions</td><td>Tools it wants run <em>on this step only</em>, with arguments. Often empty. Each is validated before anything runs.</td></tr>
+<tr><td>end_call</td><td>True only on the goodbye. The call closes after the words are spoken.</td></tr>
+</tbody></table></div>
+<p class="small" style="margin-top:10px">The small bar on each card is the model's memory: each cell is one message, teal for the parent (and tool results), violet for the model, the newest outlined.</p>
+
+<h2>The call, step by step</h2>
+<div class="timeline">
+<h3>Opening</h3>
+<article class="step lane-code">
+  <div class="rail"><span class="dot">0</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-code">Code</span>
+      <h4>The call opens</h4>
+      <span class="meta">no model call</span>
+      <div class="mem" role="img" aria-label="Memory holds 2 messages"><span class="mem-n">2</span><span class="mem-cells"><i class="u"></i><i class="a new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="lead">Greeting plus the routine's exact first question. The memory is seeded with a made-up first user turn so the history is valid for the model.</p><p class="say say-agent">Hello Asha, this is the CareCall assistant, calling for Sree.</p><p class="say say-agent">Have you had your lunch today?</p><div class="jwrap"><div class="blabel">stored in memory as message 2, assistant</div><pre class="json">{
+  <span class="k">"say"</span>: <span class="s">"Hello Asha, this is the CareCall assistant, calling for Sree. Have you had your lunch today?"</span>,
+  <span class="k">"actions"</span>: [],
+  <span class="k">"end_call"</span>: <span class="b">false</span>
+}</pre></div></div>
+  </div>
+</article>
+<h3>Turn 1 <span class="tm">2 model calls · 3.7 s</span></h3>
+<article class="step lane-parent">
+  <div class="rail"><span class="dot">1</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-parent">Parent</span>
+      <h4>The parent speaks</h4>
+      <span class="meta">speech-to-text final</span>
+      <div class="mem" role="img" aria-label="Memory holds 3 messages"><span class="mem-n">3</span><span class="mem-cells"><i class="u"></i><i class="a"></i><i class="u new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="say say-parent">Not yet, I am busy. Please call me back in four hours.</p><p class="small">Appended to memory as a <code>user</code> message.</p></div>
+  </div>
+</article><article class="step lane-model">
+  <div class="rail"><span class="dot">2</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-model">Model</span>
+      <h4>Model call #1</h4>
+      <span class="meta">sends the system prompt + 3 messages</span>
+      <div class="mem" role="img" aria-label="Memory holds 4 messages"><span class="mem-n">4</span><span class="mem-cells"><i class="u"></i><i class="a"></i><i class="u"></i><i class="a new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="lead">The model answers with one JSON object: some words, one tool request, and a flag.</p><div class="jwrap"><div class="blabel">model output</div><pre class="json">{
+  <span class="k">"say"</span>: <span class="s">"I will book a call back for four hours from now. That would be around 4:27 PM. Is that okay?"</span>,
+  <span class="k">"actions"</span>: [
+    {
+      <span class="k">"tool"</span>: <span class="s">"book_callback"</span>,
+      <span class="k">"args"</span>: {
+        <span class="k">"in_minutes"</span>: <span class="n">240</span>,
+        <span class="k">"reason"</span>: <span class="s">"Asha has not had lunch yet and is busy; needs follow-up."</span>
+      }
+    }
+  ],
+  <span class="k">"end_call"</span>: <span class="b">false</span>
+}</pre></div><div class="note"><b>Look closely.</b> It drafted <code>say</code> <em>and</em> asked for a booking. The prompt tells it to leave <code>say</code> empty when it calls a tool whose result matters. The code will throw this draft away.</div></div>
+  </div>
+</article><article class="step lane-code">
+  <div class="rail"><span class="dot">3</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-code">Code</span>
+      <h4>The tool runs and refuses</h4>
+      <span class="meta">filler spoken, nothing written</span>
+      <div class="mem" role="img" aria-label="Memory holds 5 messages"><span class="mem-n">5</span><span class="mem-cells"><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="lead"><code>book_callback</code> is a tool whose result matters, so the draft words are dropped. The agent says a stalling line while the tool runs.</p><p class="say say-agent">Umm... hold on a moment, let me note that down.</p><p class="small">The next planned reminder is at 2:57 PM, so a call-back at 4:27 PM is refused. The result goes back to the model as a new <code>user</code> message.</p><div class="jwrap"><div class="blabel">TOOL RESULTS (appended to memory)</div><pre class="json">[
+  {
+    <span class="k">"tool"</span>: <span class="s">"book_callback"</span>,
+    <span class="k">"ok"</span>: <span class="b">false</span>,
+    <span class="k">"error"</span>: <span class="s">"the next reminder is due before that time"</span>,
+    <span class="k">"reason_code"</span>: <span class="s">"next_reminder_first"</span>,
+    <span class="k">"next_reminder_at_local"</span>: <span class="s">"14:57"</span>,
+    <span class="k">"latest_possible_local"</span>: <span class="s">"14:47"</span>,
+    <span class="k">"asked_local"</span>: <span class="s">"16:27"</span>
+  }
+]</pre></div></div>
+  </div>
+</article><article class="step lane-model">
+  <div class="rail"><span class="dot">4</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-model">Model</span>
+      <h4>Model call #2</h4>
+      <span class="meta">sends the system prompt + 5 messages</span>
+      <div class="mem" role="img" aria-label="Memory holds 6 messages"><span class="mem-n">6</span><span class="mem-cells"><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="lead">Now the model can see its own request and the refusal. It explains and offers an alternative, with no actions.</p><div class="jwrap"><div class="blabel">model output</div><pre class="json">{
+  <span class="k">"say"</span>: <span class="s">"I am sorry, I cannot book it for 4:27 PM because there is an earlier reminder at 2:57 PM. The latest I can schedule this call back is 2:47 PM. Would you like me to book it then?"</span>,
+  <span class="k">"actions"</span>: [],
+  <span class="k">"end_call"</span>: <span class="b">false</span>
+}</pre></div></div>
+  </div>
+</article><article class="step lane-spoken">
+  <div class="rail"><span class="dot">5</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-spoken">Spoken</span>
+      <h4>The reply goes to the phone</h4>
+      <span class="meta">length cap and leak filter pass</span>
+      <div class="mem" role="img" aria-label="Memory holds 6 messages"><span class="mem-n">6</span><span class="mem-cells"><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="say say-agent">I am sorry, I cannot book it for 4:27 PM because there is an earlier reminder at 2:57 PM. The latest I can schedule this call back is 2:47 PM. Would you like me to book it then?</p><p class="small">No actions, so the turn ends. Nothing was promised and nothing was booked.</p></div>
+  </div>
+</article>
+<h3>Turn 2 <span class="tm">2 model calls · 3.8 s</span></h3>
+<article class="step lane-parent">
+  <div class="rail"><span class="dot">6</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-parent">Parent</span>
+      <h4>The parent counter-offers</h4>
+      <span class="meta">speech-to-text final</span>
+      <div class="mem" role="img" aria-label="Memory holds 7 messages"><span class="mem-n">7</span><span class="mem-cells"><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="say say-parent">All right, 2:47 works. Thank you, goodbye.</p></div>
+  </div>
+</article><article class="step lane-model">
+  <div class="rail"><span class="dot">7</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-model">Model</span>
+      <h4>Model call #3</h4>
+      <span class="meta">sends the system prompt + 7 messages</span>
+      <div class="mem" role="img" aria-label="Memory holds 8 messages"><span class="mem-n">8</span><span class="mem-cells"><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="lead">Two actions at once: write down that lunch has not been eaten, and book the call-back at the time the parent accepted.</p><div class="jwrap"><div class="blabel">model output</div><pre class="json">{
+  <span class="k">"say"</span>: <span class="s">"I have booked the call back for 2:47 PM. I will log that you haven't had lunch yet. Thank you, Asha."</span>,
+  <span class="k">"actions"</span>: [
+    {
+      <span class="k">"tool"</span>: <span class="s">"log_meal"</span>,
+      <span class="k">"args"</span>: {
+        <span class="k">"meal_type"</span>: <span class="s">"lunch"</span>,
+        <span class="k">"status"</span>: <span class="s">"not_yet"</span>,
+        <span class="k">"evidence"</span>: <span class="s">"Not yet, I am busy."</span>
+      }
+    },
+    {
+      <span class="k">"tool"</span>: <span class="s">"book_callback"</span>,
+      <span class="k">"args"</span>: {
+        <span class="k">"at"</span>: <span class="s">"2026-10-19 14:47"</span>,
+        <span class="k">"reason"</span>: <span class="s">"Asha has not had lunch yet and is busy; needs follow-up."</span>
+      }
+    }
+  ],
+  <span class="k">"end_call"</span>: <span class="b">true</span>
+}</pre></div><div class="note"><b>A promise made too early.</b> The draft says "I have booked the call back" before any booking exists. Because <code>book_callback</code> is a result-matters tool, this sentence is discarded and never spoken.</div></div>
+  </div>
+</article><article class="step lane-code">
+  <div class="rail"><span class="dot">8</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-code">Code</span>
+      <h4>Both tools run, in order</h4>
+      <span class="meta">filler spoken, two database writes</span>
+      <div class="mem" role="img" aria-label="Memory holds 9 messages"><span class="mem-n">9</span><span class="mem-cells"><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="say say-agent">Okay... one second, let me put that in.</p><ul class="ticks"><li><b>log_meal</b>: the quote "Not yet, I am busy." is checked against what the parent really said, found, and a <code>meal_logs</code> row is written.</li><li><b>book_callback</b>: a real call is created with its own key, scheduled for 14:47 local (09:17 UTC), and a call-back row is recorded.</li></ul><div class="jwrap"><div class="blabel">TOOL RESULTS (appended to memory)</div><pre class="json">[
+  {
+    <span class="k">"tool"</span>: <span class="s">"log_meal"</span>,
+    <span class="k">"ok"</span>: <span class="b">true</span>
+  },
+  {
+    <span class="k">"tool"</span>: <span class="s">"book_callback"</span>,
+    <span class="k">"ok"</span>: <span class="b">true</span>,
+    <span class="k">"call_id"</span>: <span class="n">3</span>,
+    <span class="k">"key"</span>: <span class="s">"1:lunch_checkin:2026-10-19:s1:cb2"</span>,
+    <span class="k">"at_utc"</span>: <span class="s">"2026-10-19T09:17:00+00:00"</span>,
+    <span class="k">"in_minutes"</span>: <span class="n">139</span>,
+    <span class="k">"at_local"</span>: <span class="s">"14:47"</span>,
+    <span class="k">"spoken"</span>: <span class="s">"2:47 in the afternoon"</span>,
+    <span class="k">"tomorrow"</span>: <span class="b">false</span>,
+    <span class="k">"shifted"</span>: <span class="b">false</span>,
+    <span class="k">"by_clock"</span>: <span class="b">true</span>,
+    <span class="k">"reused"</span>: <span class="b">false</span>,
+    <span class="k">"reason"</span>: <span class="s">"Asha has not had lunch yet and is busy; needs follow-up."</span>
+  }
+]</pre></div></div>
+  </div>
+</article><article class="step lane-model">
+  <div class="rail"><span class="dot">9</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-model">Model</span>
+      <h4>Model call #4</h4>
+      <span class="meta">sends the system prompt + 9 messages</span>
+      <div class="mem" role="img" aria-label="Memory holds 10 messages"><span class="mem-n">10</span><span class="mem-cells"><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="lead">With the booking confirmed, the model finally says the sentence, and ends the call.</p><div class="jwrap"><div class="blabel">model output</div><pre class="json">{
+  <span class="k">"say"</span>: <span class="s">"I have booked the call back for 2:47 in the afternoon. Thank you, Asha."</span>,
+  <span class="k">"actions"</span>: [],
+  <span class="k">"end_call"</span>: <span class="b">true</span>
+}</pre></div></div>
+  </div>
+</article><article class="step lane-spoken">
+  <div class="rail"><span class="dot">10</span></div>
+  <div class="card">
+    <header class="card-h">
+      <span class="chip chip-spoken">Spoken</span>
+      <h4>The goodbye, then hang-up</h4>
+      <span class="meta">end reason: callback</span>
+      <div class="mem" role="img" aria-label="Memory holds 10 messages"><span class="mem-n">10</span><span class="mem-cells"><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a"></i><i class="u"></i><i class="a new"></i></span></div>
+    </header>
+    <div class="card-b"><p class="say say-agent">I have booked the call back for 2:47 in the afternoon. Thank you, Asha.</p><p class="small"><code>end_call</code> is true and a call-back was booked, so the call ends as <code>callback</code>. The bridge waits for playback to finish, then closes the line.</p></div>
+  </div>
+</article>
+</div>
+
+<h2>After the hang-up</h2>
+<div style="margin-top:14px"><ol class="after">
+  <li><b>Close the books.</b> <code>CallSession.finish()</code> writes a <code>call.finished</code> event (steps reached, whether the parent was speaking when the line closed) and marks the call completed.</li>
+  <li><b>Summarise.</b> The post-call pipeline writes the caregiver's summary and sends the notification.</li>
+  <li><b>Decide what's next.</b> On a real phone call the outcome engine sees the call-back already booked during the call, records <code>followup.already_scheduled</code> and adds nothing. This capture ran on the evaluation channel, so that step did not run.</li>
+</ol>
+<div class="db">
+  <div><span class="dbk">meal_logs</span><span class="dbv">lunch · not_yet · quote "Not yet, I am busy."</span></div>
+  <div><span class="dbk">call_attempts</span><span class="dbv">call-back · key <code>…:cb2</code> · 14:47 local</span></div>
+  <div><span class="dbk">transcript_turns</span><span class="dbv">8 lines, plain text, for humans and the outcome engine</span></div>
+  <div><span class="dbk">nothing recorded</span><span class="dbv">for the refused 4:27 PM time</span></div>
+</div></div>
+
+<h2>The memory, message by message</h2>
+<p class="sub" style="font-size:16px;margin-top:8px">Every model call is sent the system prompt plus this list so far, which is why the message count it receives goes 3, 5, 7, 9.</p>
+<div class="tablewrap"><table class="memtable"><tbody><tr><td class="num">1</td><td><span class="role role-user">user</span></td><td class="when">after the opening</td><td class="txt">(The call has just connected.)</td></tr><tr><td class="num">2</td><td><span class="role role-assistant">assistant</span></td><td class="when">after the opening</td><td class="txt">Hello Asha... Have you had your lunch today?  {actions: []}</td></tr><tr><td class="num">3</td><td><span class="role role-user">user</span></td><td class="when">turn 1, parent speaks</td><td class="txt">Not yet, I am busy. Please call me back in four hours.</td></tr><tr><td class="num">4</td><td><span class="role role-assistant">assistant</span></td><td class="when">model call #1</td><td class="txt">{&quot;say&quot;: &quot;I will book a call back…&quot;, actions: [book_callback 240 min]}</td></tr><tr><td class="num">5</td><td><span class="role role-user">user</span></td><td class="when">tool result</td><td class="txt">TOOL RESULTS: book_callback ok:false, reason_code next_reminder_first</td></tr><tr><td class="num">6</td><td><span class="role role-assistant">assistant</span></td><td class="when">model call #2</td><td class="txt">{&quot;say&quot;: &quot;I cannot book it for 4:27 PM… latest 2:47 PM&quot;, actions: []}</td></tr><tr><td class="num">7</td><td><span class="role role-user">user</span></td><td class="when">turn 2, parent speaks</td><td class="txt">All right, 2:47 works. Thank you, goodbye.</td></tr><tr><td class="num">8</td><td><span class="role role-assistant">assistant</span></td><td class="when">model call #3</td><td class="txt">{&quot;say&quot;: &quot;I have booked…&quot;, actions: [log_meal, book_callback 14:47], end_call: true}</td></tr><tr><td class="num">9</td><td><span class="role role-user">user</span></td><td class="when">tool result</td><td class="txt">TOOL RESULTS: log_meal ok, book_callback ok, key …:cb2</td></tr><tr><td class="num">10</td><td><span class="role role-assistant">assistant</span></td><td class="when">model call #4</td><td class="txt">{&quot;say&quot;: &quot;I have booked the call back for 2:47…&quot;, actions: [], end_call: true}</td></tr></tbody></table></div>
+
+<h2>A second call: no refusal</h2>
+<p class="sub" style="font-size:16px;margin-top:8px">The happy path. Notice that a turn with no tools is a single model call, and a turn with tools is two.</p>
+<div class="pair">
+  <div class="mini"><div class="mini-h"><span class="chip chip-parent">Parent</span></div><p class="say say-parent">Yes, I did.</p></div>
+  <div class="mini"><div class="mini-h"><span class="chip chip-model">Model</span><span class="meta">1 call, no tools</span></div><div class="jwrap"><pre class="json">{
+  <span class="k">"say"</span>: <span class="s">"What did you have?"</span>,
+  <span class="k">"actions"</span>: [],
+  <span class="k">"end_call"</span>: <span class="b">false</span>
+}</pre></div></div>
+  <div class="mini"><div class="mini-h"><span class="chip chip-parent">Parent</span></div><p class="say say-parent">I had dal, rice, and a little curd. Could you remind me about my appointment with Dr Rao this coming Friday at 4:30 in the afternoon?</p></div>
+  <div class="mini"><div class="mini-h"><span class="chip chip-model">Model</span><span class="meta">call 2 of 3: two actions, draft words discarded</span></div><div class="jwrap"><pre class="json">{
+  <span class="k">"say"</span>: <span class="s">"I have logged your lunch: dal, rice, and curd. I will set a reminder for Dr Rao on Friday at 4:30 PM."</span>,
+  <span class="k">"actions"</span>: [
+    {
+      <span class="k">"tool"</span>: <span class="s">"log_meal"</span>,
+      <span class="k">"args"</span>: {
+        <span class="k">"meal_type"</span>: <span class="s">"lunch"</span>,
+        <span class="k">"status"</span>: <span class="s">"eaten"</span>,
+        <span class="k">"items"</span>: [
+          <span class="s">"dal"</span>,
+          <span class="s">"rice"</span>,
+          <span class="s">"curd"</span>
+        ],
+        <span class="k">"evidence"</span>: <span class="s">"I had dal, rice, and a little curd."</span>
+      }
+    },
+    {
+      <span class="k">"tool"</span>: <span class="s">"add_reminder"</span>,
+      <span class="k">"args"</span>: {
+        <span class="k">"message"</span>: <span class="s">"Appointment with Dr Rao"</span>,
+        <span class="k">"at"</span>: <span class="s">"2026-10-23 16:30"</span>
+      }
+    }
+  ],
+  <span class="k">"end_call"</span>: <span class="b">true</span>
+}</pre></div></div>
+  <div class="mini"><div class="mini-h"><span class="chip chip-code">Code</span><span class="meta">filler spoken, two writes</span></div><div class="jwrap"><div class="blabel">TOOL RESULTS</div><pre class="json">[
+  {
+    <span class="k">"tool"</span>: <span class="s">"log_meal"</span>,
+    <span class="k">"ok"</span>: <span class="b">true</span>
+  },
+  {
+    <span class="k">"tool"</span>: <span class="s">"add_reminder"</span>,
+    <span class="k">"ok"</span>: <span class="b">true</span>,
+    <span class="k">"reminder_id"</span>: <span class="n">2</span>,
+    <span class="k">"call_id"</span>: <span class="n">2</span>,
+    <span class="k">"already_existed"</span>: <span class="b">false</span>
+  }
+]</pre></div></div>
+  <div class="mini"><div class="mini-h"><span class="chip chip-model">Model</span><span class="meta">call 3 of 3</span></div><div class="jwrap"><pre class="json">{
+  <span class="k">"say"</span>: <span class="s">"Your reminder for Dr Rao on Friday at 4:30 PM is set. Thank you, Asha. Goodbye."</span>,
+  <span class="k">"actions"</span>: [],
+  <span class="k">"end_call"</span>: <span class="b">true</span>
+}</pre></div></div>
+</div>
+<p class="small">Three model calls, about five seconds of model and tool time. The reminder is stored in UTC (11:00), which is 16:30 for Asha.</p>
+
+<h2>What to take from it</h2>
+<ol class="take">
+  <li>The model proposes; a fact or a booking becomes real only when a tool succeeds. Words written before a result-matters tool has run are thrown away.</li>
+  <li>A refusal is just another message. The model reads it, explains it, and offers something that works.</li>
+  <li>Each call is sent the whole conversation so far, so the model always has the full context, and the prompt grows a little each step.</li>
+  <li>A call of about a minute is only a handful of model calls. The model's share is a few seconds; the rest is speech and the parent's pauses.</li>
+</ol>
+<footer>Captured from two real runs against the live model on 19 October 2026. Quoted JSON is exactly what the system produced, with the model's reasons shortened nowhere. Timings are model plus tool time per turn.</footer>
+</div>
+</body></html>

@@ -1,0 +1,22 @@
+# The app's own Postgres (calls, logs, alerts, schedule). Separate from the one inside the Langfuse stack (which uses 5432).
+#   docker compose -f docker/app/docker-compose.yml up -d
+# then in .env:  DATABASE_URL=postgresql+psycopg://carecall:carecall@localhost:5433/carecall
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: carecall
+      POSTGRES_PASSWORD: carecall      # local development only: change before exposing anywhere
+      POSTGRES_DB: carecall
+    ports:
+      - 127.0.0.1:5433:5432
+    volumes:
+      - carecall_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U carecall -d carecall"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+volumes:
+  carecall_pgdata:

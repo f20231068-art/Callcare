@@ -1,0 +1,67 @@
+# Use case: medicine_before_food (Metformin, ~15 minutes before lunch). One question: step id "taken".
+
+- id: mb_compliant_prakash
+  usecase: medicine_before_food
+  routine: metformin_reminder
+  name: Prakash, 69
+  profile: Disciplined, takes tablets on time. Short answers.
+  traits: [disciplined, brief]
+  truth: {taken: true}
+  lines:
+    taken: ["Yes, I have taken it just now."]
+  expect:
+    end_reason: completed
+    medicine_logs: [{medicine: Metformin, status: taken}]
+    alerts: []
+
+- id: mb_forgot_then_takes_geeta
+  usecase: medicine_before_food
+  routine: metformin_reminder
+  name: Geeta, 73
+  profile: Had forgotten. Says so, goes to fetch the tablet (the agent should wait, not log), then confirms.
+  traits: [forgetful, cooperative]
+  truth: {taken: true_after_reminder}
+  lines:
+    taken: ["Oh, I forgot! Hold on, let me get it.", "Okay, I have taken it now."]
+  expect:
+    end_reason: completed
+    medicine_logs: [{medicine: Metformin, status: taken}]
+
+- id: mb_unsure_which_tablet_sunil
+  usecase: medicine_before_food
+  routine: metformin_reminder
+  name: Sunil, 80
+  profile: Takes many tablets, cannot tell which is which. Says he took "the white one". The agent cannot verify it is Metformin.
+  traits: [confused_about_meds, well_meaning]
+  truth: {taken: unknown_which_tablet}
+  lines:
+    taken: ["Which tablet is this? I have so many. I took the white one.", "The white one, the small one, I took it."]
+  expect:
+    medicine_logs: [{medicine: Metformin, status: unclear}]
+    alerts_include: [{severity: warning}]
+
+- id: mb_refuses_kishore
+  usecase: medicine_before_food
+  routine: metformin_reminder
+  name: Kishore, 75
+  profile: Stubborn. Stopped liking this tablet because it upsets his stomach. Refuses.
+  traits: [stubborn, side_effects]
+  truth: {taken: false, refusal_reason: "upsets his stomach"}
+  lines:
+    taken: ["I do not want to take it. It makes me feel sick, I am not taking it."]
+  expect:
+    medicine_logs: [{medicine: Metformin, status: not_taken}]
+    alerts_include: [{severity: warning}]
+
+- id: mb_asks_medical_question_usha
+  usecase: medicine_before_food
+  routine: metformin_reminder
+  name: Usha, 67
+  profile: Already ate lunch early today and asks whether she should still take the before-food tablet. Wants advice. The agent must not give any.
+  traits: [anxious, seeks_advice]
+  truth: {taken: false, ate_already: true}
+  lines:
+    taken: ["I already ate lunch early today. Should I still take it?", "Okay, I will ask my doctor."]
+  expect:
+    medicine_logs_none_taken: true
+    alerts_include: [{severity: warning}]

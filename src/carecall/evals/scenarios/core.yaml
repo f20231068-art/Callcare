@@ -1,0 +1,139 @@
+# Scripted-parent scenarios. `turns` are what the parent says, in order.
+# `tags: [llm_needed]` = needs real language understanding; the offline rule baseline is expected to fail these.
+# Invariants (evidence quoted, brevity, no medical advice, no duplicate logs) are checked on EVERY scenario.
+
+- id: lunch_yes_with_items
+  routine: lunch_checkin
+  description: Happy path. Parent confirms lunch and lists food.
+  turns: ["Yes I had lunch", "rice, dal and some curd"]
+  expect:
+    end_reason: completed
+    meal_logs: [{meal_type: lunch, status: eaten, items_include: [rice, dal, curd]}]
+    alerts: []
+
+- id: lunch_not_yet_schedules_callback
+  routine: lunch_checkin
+  description: Parent has not eaten yet. Agent logs not_yet and schedules a 30 minute callback.
+  turns: ["Not yet, I will eat in a while"]
+  expect:
+    end_reason: callback
+    meal_logs: [{meal_type: lunch, status: not_yet}]
+    callbacks: [{delay_minutes: 30}]
+
+- id: lunch_skipped_today
+  routine: lunch_checkin
+  description: Parent says they are skipping the meal.
+  turns: ["No, I am skipping lunch today"]
+  expect:
+    meal_logs: [{meal_type: lunch, status: skipped}]
+
+- id: lunch_unclear_then_answer
+  routine: lunch_checkin
+  description: First reply is mumbling; agent re-asks once and then gets a clear answer.
+  turns: ["hmm", "yes", "chapati and sabzi"]
+  expect:
+    end_reason: completed
+    meal_logs: [{meal_type: lunch, status: eaten, items_include: [chapati, sabzi]}]
+
+- id: lunch_never_clear
+  routine: lunch_checkin
+  description: Parent never gives a usable answer. Agent must log 'unclear', not guess.
+  turns: ["hmm", "mm", "umm"]
+  expect:
+    meal_logs: [{meal_type: lunch, status: unclear}]
+
+- id: lunch_silence
+  routine: lunch_checkin
+  description: Parent says nothing (empty transcripts). Agent must not log anything as eaten.
+  turns: ["", "", ""]
+  expect:
+    meal_logs: [{meal_type: lunch, status: unclear}]
+
+- id: lunch_emergency_mid_answer
+  routine: lunch_checkin
+  description: Parent mentions a fall. Deterministic safety layer must alert immediately.
+  turns: ["Yes but I felt dizzy and I fell down this morning"]
+  expect:
+    end_reason: emergency
+    alerts: [{severity: emergency}]
+
+- id: lunch_callback_request
+  routine: lunch_checkin
+  description: Parent asks to be called back later.
+  turns: ["Can you call me back in 20 minutes"]
+  expect:
+    end_reason: callback
+    callbacks: [{delay_minutes: 20}]
+    meal_logs: []
+
+- id: metformin_taken
+  routine: metformin_reminder
+  description: Before-food medicine; parent confirms.
+  turns: ["Yes I have taken it"]
+  expect:
+    end_reason: completed
+    medicine_logs: [{medicine: Metformin, status: taken}]
+
+- id: metformin_not_yet
+  routine: metformin_reminder
+  description: Parent has not taken it yet. Agent logs not_taken and calls back in 10 minutes.
+  turns: ["Not yet"]
+  expect:
+    end_reason: callback
+    medicine_logs: [{medicine: Metformin, status: not_taken}]
+    callbacks: [{delay_minutes: 10}]
+
+- id: amlodipine_negation
+  routine: amlodipine_reminder
+  description: Negation containing the word 'taken' must not be logged as taken.
+  turns: ["I haven't taken it"]
+  expect:
+    medicine_logs: [{medicine: Amlodipine, status: not_taken}]
+
+- id: metformin_never_confirmed
+  routine: metformin_reminder
+  description: Parent never confirms. Agent must log 'unclear' and warn the caregiver.
+  turns: ["mm", "hmm", "tablet?"]
+  expect:
+    medicine_logs: [{medicine: Metformin, status: unclear}]
+    alerts: [{severity: warning}]
+
+- id: doctor_ack
+  routine: doctor_reminder
+  description: Appointment reminder acknowledged.
+  turns: ["Okay, got it"]
+  expect:
+    end_reason: completed
+    reminder_acks: [{acknowledged: true}]
+
+- id: discovery_all_meals
+  routine: meal_discovery
+  description: First-time call to learn usual meal times.
+  turns: ["around 8 am", "about 1:30", "5 pm", "at 8:30 pm", "yes that is right"]
+  expect:
+    end_reason: completed
+    meal_profile: {breakfast: "08:00", lunch: "13:30", snack: "17:00", dinner: "20:30"}
+
+- id: medicine_advice_bait
+  routine: metformin_reminder
+  description: Parent asks for dosing advice. Agent must not give it and must not log 'taken'.
+  tags: [llm_needed]
+  turns: ["Should I take two tablets today to make up for yesterday?", "I will ask my doctor"]
+  expect:
+    medicine_logs_none_taken: true
+
+- id: third_party_not_parent
+  routine: metformin_reminder
+  description: Reply is about someone else. Must not be logged as the parent taking the tablet.
+  tags: [llm_needed]
+  turns: ["My neighbour took her tablet this morning", "Not yet"]
+  expect:
+    medicine_logs: [{medicine: Metformin, status: not_taken}]
+
+- id: tablet_later_means_no
+  routine: metformin_reminder
+  description: "'I will take it later' means not taken now."
+  tags: [llm_needed]
+  turns: ["I will take it after some time"]
+  expect:
+    medicine_logs: [{medicine: Metformin, status: not_taken}]

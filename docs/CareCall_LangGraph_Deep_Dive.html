@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CareCall LangGraph Deep Dive</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky index, one reading column. Diagrams scroll sideways inside their own box. The state stepper lets you walk through one real turn node by node. */
+:root {
+  --bg: #f4f5f8; --panel: #ffffff; --fg: #18202e; --muted: #596478; --line: #d8dde6; --soft: #eceff4; --accent: #0f6e8c; --accent-soft: #dcedf3;
+  --http: #4b5a78; --ws: #0b7a75; --db: #6d4aa8; --llm: #b3306c; --ok: #1a7f4b; --warn: #a76100; --bad: #b42318; --new: #1a7f4b;
+  --font: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif; --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11151c; --panel: #181e28; --fg: #e5e9f0; --muted: #96a2b6; --line: #2a3242; --soft: #212939; --accent: #55b6d3; --accent-soft: #17313b;
+  --http: #9aa9c8; --ws: #4fd1c5; --db: #b79cf0; --llm: #f08ab8; --ok: #4cc38a; --warn: #f0b24b; --bad: #f97066; --new: #4cc38a; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #11151c; --panel: #181e28; --fg: #e5e9f0; --muted: #96a2b6; --line: #2a3242; --soft: #212939; --accent: #55b6d3; --accent-soft: #17313b;
+  --http: #9aa9c8; --ws: #4fd1c5; --db: #b79cf0; --llm: #f08ab8; --ok: #4cc38a; --warn: #f0b24b; --bad: #f97066; --new: #4cc38a; color-scheme: dark; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.62 var(--font);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 64px; }
+.shell { max-width: 1260px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 40px; }
+nav.index { position: sticky; top: 0; align-self: start; max-height: 100vh; overflow-y: auto; padding: 28px 0; }
+nav.index b { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+nav.index a { display: block; padding: 4px 10px; margin-left: -10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13.5px; }
+nav.index a:hover, nav.index a.on { color: var(--fg); background: var(--soft); }
+main { min-width: 0; padding-top: 28px; }
+@media (max-width: 900px) {
+  .shell { display: block; }
+  nav.index { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; gap: 6px; overflow-x: auto; padding: 10px 0; background: var(--bg); max-height: none; border-bottom: 1px solid var(--line); }
+  nav.index b { display: none; } nav.index a { white-space: nowrap; margin: 0; }
+}
+h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 10px; text-wrap: balance; letter-spacing: -.01em; }
+h2 { font-size: 1.35rem; line-height: 1.25; margin: 52px 0 6px; padding-top: 20px; border-top: 1px solid var(--line); text-wrap: balance; }
+h2 small { display: block; font: 500 12px var(--mono); color: var(--accent); letter-spacing: .04em; margin-bottom: 4px; }
+h3 { font-size: 1.02rem; margin: 22px 0 6px; }
+p { margin: 8px 0; max-width: 80ch; } ul, ol { max-width: 84ch; padding-left: 1.25em; } li { margin: 3px 0; }
+.lede { font-size: 1.08rem; color: var(--muted); max-width: 74ch; }
+code { font: 500 .86em var(--mono); background: var(--soft); padding: 1px 5px; border-radius: 4px; word-break: break-word; }
+pre { background: var(--soft); border-radius: 8px; padding: 10px 12px; overflow-x: auto; font: 400 12.5px/1.55 var(--mono); margin: 8px 0; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; } th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: .03em; }
+th, td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; } tr:last-child td { border-bottom: 0; } td:first-child { font-weight: 500; }
+td.nw { white-space: nowrap; }
+.diagram { padding: 10px; } svg { display: block; width: 100%; height: auto; min-width: 900px; } svg text { font-family: var(--font); fill: var(--fg); }
+.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; max-width: 84ch; }
+.callout.warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--panel)); }
+.callout.bad { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--panel)); }
+.pill { display: inline-block; padding: 0 8px; border-radius: 99px; font-size: 12px; background: var(--soft); white-space: nowrap; }
+.stepper { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; margin: 14px 0; }
+.stepper .bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--soft); align-items: center; }
+.stepper button { font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; }
+.stepper button.on { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+.stepper button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stepper .nav { margin-left: auto; display: flex; gap: 6px; }
+.stepper .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
+@media (max-width: 800px) { .stepper .cols { grid-template-columns: 1fr; } }
+.stepper .what { padding: 14px 16px; } .stepper .what h4 { margin: 0 0 6px; font: 600 1rem var(--mono); } .stepper .what p { font-size: .93rem; }
+.stepper .snap { padding: 10px 14px 14px; border-left: 1px solid var(--line); min-width: 0; }
+.stepper .snap pre { margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.stepper .snap .k { color: var(--muted); } .stepper .snap .chg { background: color-mix(in srgb, var(--new) 18%, var(--panel)); border-radius: 3px; display: block; }
+.stepper .snap h5 { margin: 4px 0 6px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="index" aria-label="Sections">
+  <b>LangGraph deep dive</b>
+  <a href="#overview">Overview</a><a href="#session">1. Making the session</a><a href="#nosession">2. No session</a><a href="#graph">3. The graph</a><a href="#state">4. The state</a>
+  <a href="#flow">5. Where information comes from</a><a href="#trace">6. One turn, node by node</a><a href="#nodes">7. Node reference</a><a href="#exits">8. Every way a call ends</a><a href="#issues">9. Problems found</a>
+</nav>
+<main>
+
+<header id="overview">
+  <h1>LangGraph deep dive</h1>
+  <p class="lede">What happens between "Twilio sends a message" and "the call is cut": how the session is created and kept, what the graph's nodes read and write, where each piece of information comes from, and every way a call can end. Real values come from call 19, the 11:23 medicine reminder.</p>
+  <div class="callout"><b>Three ideas to hold on to.</b> (1) A <b>session</b> is a Python object, <code>CallSession</code>, that lives in the server's memory for the length of one call. (2) The <b>graph</b> is a set of small functions (nodes) that LangGraph runs in an order that depends on the data. (3) The <b>state</b> is one dictionary that every node can read and add to; the conversation memory is one key inside it.</div>
+</header>
+
+<section id="session">
+  <h2><small>STEP 1</small>How the session is created and stored</h2>
+  <p>Nothing about the conversation exists until the parent answers. Then Twilio asks our server what to say, and that request creates everything. The picture shows the whole path, including what happens when something is missing.</p>
+  <div class="scroll diagram"><svg id="dg1" viewBox="0 0 1000 880" role="img" aria-labelledby="d1t"><title id="d1t">Flow from the parent answering to the session existing, and the turn loop with the no-session branch</title></svg></div>
+  <h3>What each box does</h3>
+  <div class="scroll"><table><thead><tr><th>Step</th><th>File and function</th><th>Details</th></tr></thead><tbody>
+    <tr><td>A</td><td>api.py <code>twilio_voice</code></td><td>Twilio's request to <code>/twilio/voice?call_id=19&amp;t=...</code>. A valid Twilio signature or, when the header is missing (trial accounts), the per-call token is required. Otherwise 403 and the call drops.</td></tr>
+    <tr><td>B</td><td>api.py</td><td>Reads <code>TWILIO_VOICE_MODE</code>. <code>gather</code> goes on to <code>GatherCalls.start</code>; <code>stream</code> returns streaming instructions and the work happens in <code>bridge.py</code> instead.</td></tr>
+    <tr><td>C</td><td>gather.py <code>start</code></td><td>Calls <code>CallSession(call_id, channel="twilio")</code> and keeps the result in <code>CALLS.sessions[call_id]</code>, a plain Python dictionary inside the server process. This dictionary is how the second sentence finds the same conversation as the first.</td></tr>
+    <tr><td>D</td><td>session.py <code>__init__</code></td><td>Builds the LLM client, then <code>build_conversation_graph(llm, ...)</code> from converse.py. That function defines the nodes and compiles them with <code>MemorySaver()</code>. <b>Each session gets its own new MemorySaver</b>, so the memory belongs to this session object. It also makes the <code>thread_id</code> (<code>call-19</code>), a trace id, and sets <code>turn_no = 0</code>.</td></tr>
+    <tr><td>E</td><td>session.py <code>open</code></td><td>Reads the database once to build the call's facts (<code>build_context</code>), sets the call <code>in_progress</code>, saves a <code>context.built</code> audit event, then runs the graph for the first time (see the graph section). The two opening lines are saved as transcript rows.</td></tr>
+    <tr><td>F</td><td>gather.py <code>_twiml</code></td><td>Puts the lines inside <code>&lt;Say&gt;</code> and a <code>&lt;Gather input="speech"&gt;</code>, returned to Twilio as the response to its first request.</td></tr>
+    <tr><td>G</td><td>api.py <code>twilio_turn</code> then <code>GatherCalls.turn</code></td><td>For every sentence: look up <code>self.sessions.get(call_id)</code>. If found, run the agent. If not found, see the next section.</td></tr>
+  </tbody></table></div>
+</section>
+
+<section id="nosession">
+  <h2><small>STEP 2</small>What happens when there is no session</h2>
+  <p>A session can be missing if the server restarted during the call (the dictionary lives in the process, so a restart empties it), or if a turn request arrives for a call this process never started.</p>
+  <ol>
+    <li><code>GatherCalls.turn</code> finds <code>self.sessions.get(call_id)</code> is <code>None</code> and logs "no session for this turn".</li>
+    <li>It answers Twilio at once with: "I am sorry, we got disconnected. I will call you again shortly. Goodbye." followed by a hang-up. The parent hears that, then the call ends.</li>
+    <li>It calls <code>_abandon_orphan(call_id)</code>, which runs in a worker thread: it moves the call to <code>abandoned</code> (reason "the server lost this conversation"), writes a <code>call.orphaned</code> audit event, and runs the outcome engine straight away. With no conversation to read, the engine decides on the call's status and schedules a retry.</li>
+    <li>Twilio then sends its "completed" status. The status handler sees the call is being handled and leaves it alone.</li>
+    <li>When the background work ends, the call is removed from the "finishing" set, so nothing is left behind.</li>
+  </ol>
+  <div class="callout"><b>Fixed (this was a gap).</b> Before, nothing was recorded at that point, the status handler skipped the call, and it stayed <code>in_progress</code> until the reaper failed it up to 25 minutes later. Now it is recorded and retried at once. There is a test for it (<code>test_gather_turn_with_no_session_records_the_call_as_abandoned_at_once</code>). Not recorded: the earlier part of that conversation, because the memory of it was lost with the session.</div>
+  <p>Other "missing" cases: if the agent is too slow six times in a row the call ends politely (a session still exists, so it is recorded). If a Twilio status arrives for a call that never opened a session, the status handler records it normally (no answer, failed).</p>
+</section>
+
+<section id="graph">
+  <h2><small>STEP 3</small>The graph: nodes, edges and decisions</h2>
+  <p>A LangGraph graph is a set of functions (nodes) plus rules (edges) that say which node runs next. Some edges are fixed; the rest are small <b>router functions</b> that look at the state and return the name of the next node. <code>graph.invoke(input, config)</code> runs from <code>START</code> until it reaches <code>END</code>, then returns the final state.</p>
+  <div class="scroll diagram"><svg id="dg2" viewBox="0 0 1120 700" role="img" aria-labelledby="d2t"><title id="d2t">The seven nodes of the conversation graph with the state keys each reads and writes</title></svg></div>
+  <h3>The routers (the decisions)</h3>
+  <div class="scroll"><table><thead><tr><th>Router</th><th>Runs after</th><th>Rule</th></tr></thead><tbody>
+    <tr><td><code>route_start</code></td><td>START</td><td><code>state.started</code> true means a later turn, go to <code>safety</code>. False means the first turn, go to <code>open</code>.</td></tr>
+    <tr><td><code>after_safety</code></td><td>safety</td><td>Emergency words found: <code>escalate</code>. Three silences in a row: <code>give_up</code>. Otherwise: <code>agent</code>.</td></tr>
+    <tr><td><code>after_agent</code></td><td>agent</td><td>The model asked for actions (<code>pending</code> not empty): <code>tools</code>. Otherwise: <code>finish</code>.</td></tr>
+    <tr><td><code>after_tools</code></td><td>tools</td><td><code>again</code> true (a result matters or a tool failed, and fewer than 4 steps so far): back to <code>agent</code>. Otherwise: <code>finish</code>.</td></tr>
+  </tbody></table></div>
+  <p>The loop <b>agent, tools, agent</b> is the "agent loop": the model proposes, code executes, the model sees the result and speaks. <code>open</code>, <code>escalate</code>, <code>give_up</code> and <code>finish</code> all go straight to END.</p>
+</section>
+
+<section id="state">
+  <h2><small>STEP 4</small>The state: the one dictionary every node shares</h2>
+  <p>Each node receives the whole state and returns only the keys it wants to change. LangGraph merges that into the state (a returned key replaces the old value). The state is saved by <code>MemorySaver</code> after every node, under this session's <code>thread_id</code>, and loaded again at the start of the next <code>invoke</code>. That is how the conversation survives from one sentence to the next.</p>
+  <div class="scroll"><table><thead><tr><th>Key</th><th>Meaning</th><th>Lifetime</th><th>Written by</th></tr></thead><tbody>
+    <tr><td><code>ctx</code></td><td>Everything the agent may know about this call: parent's name, routine, medicine or reminder, meal times, today's logs, attempt number, previous outcome</td><td>Whole call</td><td>open (passed in by <code>session.open</code>)</td></tr>
+    <tr><td><code>system</code></td><td>The system prompt text</td><td>Whole call</td><td>open</td></tr>
+    <tr><td><code>messages</code></td><td><b>The memory.</b> List of <code>{role, content}</code>: user = the parent's words and <code>TOOL RESULTS: [...]</code>; assistant = the model's own JSON replies. Only the last 40 are sent to the model.</td><td>Whole call</td><td>open, safety, agent, tools, escalate, give_up</td></tr>
+    <tr><td><code>started</code></td><td>Has the call begun? Decides open vs safety next time</td><td>Whole call</td><td>open</td></tr>
+    <tr><td><code>parent_turns</code>, <code>silence_run</code></td><td>Counts of the parent's turns (limit 24) and of silences in a row (limit 3)</td><td>Whole call</td><td>safety</td></tr>
+    <tr><td><code>booked</code>, <code>emergency</code></td><td>Did a booking succeed, or an emergency alert, at any point</td><td>Whole call</td><td>tools</td></tr>
+    <tr><td><code>filler_n</code></td><td>Which stalling phrase to use next</td><td>Whole call</td><td>tools</td></tr>
+    <tr><td><code>utterance</code></td><td>What the parent just said</td><td>This turn (given by the caller)</td><td>session.turn passes it in</td></tr>
+    <tr><td><code>emergency_hit</code>, <code>pending</code>, <code>say</code>, <code>end_call</code>, <code>iterations</code>, <code>again</code>, <code>tool_log</code>, <code>fillers</code>, <code>early</code>, <code>llm_error</code></td><td>Scratch values for one turn: the emergency match, the actions the model asked for, what it wants to say, loop counters, tool results, stalling lines</td><td>Reset at the start of each turn</td><td>safety resets; agent and tools set</td></tr>
+    <tr><td><code>reply</code>, <code>done</code>, <code>end_reason</code></td><td>The output: lines to speak, whether the call ends, and why</td><td>This turn</td><td>open, escalate, give_up, finish</td></tr>
+  </tbody></table></div>
+  <div class="callout warn"><b>Memory lives inside the session object.</b> Because every <code>CallSession</code> builds its own graph with its own <code>MemorySaver</code>, the conversation exists only while that object does. There is no copy in the database (the transcript rows are a log, not the memory). That is why "no session" means the agent no longer remembers anything.</div>
+</section>
+
+<section id="flow">
+  <h2><small>STEP 5</small>Where each piece of information comes from, and how it travels</h2>
+  <div class="scroll diagram"><svg id="dg3" viewBox="0 0 1000 560" role="img" aria-labelledby="d3t"><title id="d3t">Data flow: database to call context to system prompt, the parent's words to memory, the model, tools, and the reply back to Twilio</title></svg></div>
+  <div class="scroll"><table><thead><tr><th>Information</th><th>Source</th><th>Travels through</th><th>Used for</th></tr></thead><tbody>
+    <tr><td>Who the parent is, their routine, the medicine or reminder, meal times, today's logs</td><td>PostgreSQL (parents, routines, medicines, reminders, meal_profile, meal_logs)</td><td><code>build_context()</code> builds a <code>CallContext</code> once; <code>session.open</code> stores it in the state as <code>ctx</code></td><td>The prompt, the scripted greeting, and the tool arguments (for example which medicine id)</td></tr>
+    <tr><td>The instructions to the model</td><td>Code: <code>system_prompt(ctx, earlier)</code> in converse.py, plus the generated tool list</td><td>Built in <code>open_</code> and kept in the state as <code>system</code></td><td>Sent with every model call</td></tr>
+    <tr><td>What was said earlier on a previous attempt</td><td>PostgreSQL <code>transcript_turns</code> of the previous call</td><td><code>_earlier(ctx)</code> adds the last 12 lines to the prompt, only when that attempt was cut off mid-conversation</td><td>Continuing without repeating questions</td></tr>
+    <tr><td>What the parent just said</td><td>Twilio's recogniser, in the <code>SpeechResult</code> field</td><td>api.py, then <code>GatherCalls.turn</code>, then <code>session.turn</code> as <code>{"utterance": ...}</code></td><td>Emergency check; added to <code>messages</code></td></tr>
+    <tr><td>The conversation so far</td><td>The state's <code>messages</code> list (restored by MemorySaver)</td><td>The last 40 are passed to <code>_llm_step</code></td><td>Context for the model</td></tr>
+    <tr><td>What to say and do</td><td>The LLM, as one JSON object</td><td><code>_normalise</code> makes it <code>{say, actions, end_call}</code>; stored as an assistant message and in <code>pending</code></td><td>Words to speak, tools to run</td></tr>
+    <tr><td>The results of tools</td><td>The tool function and the database</td><td><code>run_tools</code> adds <code>TOOL RESULTS: [...]</code> as a user message</td><td>The model's next step</td></tr>
+    <tr><td>The final reply</td><td><code>finish</code> node</td><td>Returned by <code>graph.invoke</code> as <code>reply</code>, <code>done</code>, <code>end_reason</code>; <code>session.turn</code> returns a <code>TurnResult</code></td><td>gather.py turns it into TwiML for Twilio</td></tr>
+  </tbody></table></div>
+</section>
+
+<section id="trace">
+  <h2><small>STEP 6</small>One turn, node by node</h2>
+  <p>This is the real turn from call 19. The parent said <b>"No, can you remind me in 2 minutes?"</b>. Click through the steps. The right side shows the state after each node; the green rows are what that node just changed.</p>
+  <div class="stepper" id="stepper"></div>
+</section>
+
+<section id="nodes">
+  <h2><small>STEP 7</small>Node reference</h2>
+  <div class="scroll"><table><thead><tr><th>Node</th><th>Reads</th><th>Writes</th><th>Side effects</th></tr></thead><tbody>
+    <tr><td>open</td><td><code>ctx</code></td><td><code>system</code>, <code>messages</code>, <code>started</code>, counters, <code>reply</code></td><td>Audit event <code>call.opened</code>. No model call, except when the previous attempt was <b>cut off mid-conversation</b> (outcome <code>cut_off</code>): then one model call continues it. A call-back or a retry after no answer uses the scripted opening.</td></tr>
+    <tr><td>safety</td><td><code>utterance</code>, <code>messages</code>, <code>silence_run</code>, <code>parent_turns</code></td><td><code>messages</code> (adds the parent's words, or "(silence)"), <code>emergency_hit</code>, counters, resets the scratch keys</td><td>None. The emergency check is a pattern match.</td></tr>
+    <tr><td>escalate</td><td><code>ctx</code>, <code>emergency_hit</code>, <code>utterance</code></td><td><code>reply</code>, <code>done</code> true, <code>end_reason</code> "emergency"</td><td>Writes an emergency alert row</td></tr>
+    <tr><td>give_up</td><td><code>ctx</code></td><td><code>reply</code>, <code>done</code> true, <code>end_reason</code> "completed"</td><td>Writes an "unclear" or "not acknowledged" log and a warning alert</td></tr>
+    <tr><td>agent</td><td><code>system</code>, <code>messages</code> (last 40), <code>iterations</code></td><td><code>messages</code> (adds the model's JSON), <code>pending</code>, <code>say</code>, <code>end_call</code>, <code>iterations</code></td><td>One LLM call (a second try if the reply is not JSON). Audit events <code>converse.step</code> and, if a booking was held, <code>converse.held</code>.</td></tr>
+    <tr><td>tools</td><td><code>pending</code>, <code>ctx</code>, <code>filler_n</code></td><td><code>tool_log</code>, <code>booked</code>, <code>emergency</code>, <code>again</code>, <code>messages</code> (adds the results), <code>fillers</code>, <code>pending</code> cleared</td><td>Runs each action through <code>call_tool</code>, which writes to the database. A filler line is spoken first if a result matters.</td></tr>
+    <tr><td>finish</td><td><code>say</code>, <code>end_call</code>, <code>messages</code>, <code>parent_turns</code>, <code>fillers</code></td><td><code>reply</code>, <code>done</code>, <code>end_reason</code></td><td>Applies the guards (see below); audit event <code>converse.loop_guard</code> if triggered</td></tr>
+  </tbody></table></div>
+  <h3>What <code>finish</code> does to the reply</h3>
+  <ol>
+    <li>If the model errored and said nothing: "I am sorry, I did not catch that. Could you say that again?"</li>
+    <li>If nothing was said and the call is not ending: "Sorry, could you say that again?"</li>
+    <li>If 24 parent turns have happened: a polite goodbye and end the call.</li>
+    <li>If the exact same line has now been said three times: a polite goodbye and end the call.</li>
+    <li>Cut the reply to 60 words; if it looks like it leaks an instruction, a phone number or an e-mail, replace it with "I can only help with your check-in."</li>
+    <li>Reply = stalling lines + the final line. End reason: <code>emergency</code> if an emergency alert was raised, <code>callback</code> if a booking succeeded, otherwise <code>completed</code>.</li>
+  </ol>
+</section>
+
+<section id="exits">
+  <h2><small>STEP 8</small>Every way the call gets cut</h2>
+  <div class="scroll"><table><thead><tr><th>What happens</th><th>Where it is decided</th><th>What is said</th><th>What gets recorded</th></tr></thead><tbody>
+    <tr><td>The agent finishes its job</td><td>Model returns <code>end_call: true</code>; <code>finish</code></td><td>The model's goodbye</td><td>Status completed; summary; next call decided</td></tr>
+    <tr><td>A call-back was booked</td><td>Same, with <code>booked</code> true</td><td>"I will call you again at ..."</td><td>Completed with end reason <code>callback</code></td></tr>
+    <tr><td>Emergency words</td><td><code>safety</code> then <code>escalate</code></td><td>Help is being informed</td><td>Emergency alert; notification; completed</td></tr>
+    <tr><td>Three silences</td><td><code>safety</code> then <code>give_up</code></td><td>"I cannot hear you, so I will try again later"</td><td>Unclear or not-acknowledged log; warning alert; retry later</td></tr>
+    <tr><td>24 parent turns</td><td><code>finish</code></td><td>"I do not want to keep you"</td><td>Completed</td></tr>
+    <tr><td>The same line a third time</td><td><code>finish</code></td><td>"I will leave it there for now"</td><td>Event <code>converse.loop_guard</code>; completed</td></tr>
+    <tr><td>Parent hangs up</td><td>Twilio's "completed" status, then <code>GatherCalls.ended</code></td><td>Nothing</td><td>Abandoned; summary says "ended early"; the outcome engine usually retries at once</td></tr>
+    <tr><td>Agent too slow six times</td><td><code>GatherCalls._collect</code></td><td>"I am having trouble. I will call you again shortly"</td><td>Recorded when Twilio's status arrives</td></tr>
+    <tr><td>No session</td><td><code>GatherCalls.turn</code></td><td>"We got disconnected"</td><td>Abandoned at once, event <code>call.orphaned</code>, retry decided by the outcome engine</td></tr>
+    <tr><td>Twilio cannot get instructions</td><td>A 403 or a timeout on our side</td><td>Twilio's own error message</td><td>Status webhooks only</td></tr>
+  </tbody></table></div>
+  <p>After any of these that has a session, <code>session.finish()</code> sets the final status, writes <code>call.finished</code>, runs <code>post_call</code> and the outcome engine.</p>
+</section>
+
+<section id="issues">
+  <h2><small>FOUND WHILE TRACING, AND FIXED</small>Problems this walk-through turned up</h2>
+  <div class="callout"><b>1. A call-back opened with a stale line. Fixed.</b> On a call-back, <code>open_</code> used to ask the model to continue from the earlier transcript and used its reply as the opening question. That transcript ended with "I will call you again at eleven thirty-six", so the model repeated it at the start of the call-back (call 21), and the call then drifted to a question about food. Now only a call that was <b>cut off mid-conversation</b> is continued by the model. A call-back, or a retry after no answer, uses the scripted opening (the routine's own question), and the old transcript is no longer put in the prompt for those. Checked with the real model: the call-back opened with "It is time for your Metformin 500mg... Have you taken it?", and a silence was answered with a medicine question, not a food one. Two tests cover it. I did not see the food question reproduce after the fix, but I never found its cause either, so I cannot promise it is gone.</div>
+  <div class="callout"><b>2. A call with no session was not recorded for up to 25 minutes. Fixed</b> (see section 2).</div>
+  <div class="callout"><b>3. The "finishing" set in gather.py grew forever. Fixed.</b> A call is now removed from it when its background finish is done.</div>
+  <div class="callout warn"><b>4. Still open: confidence is stored but unused.</b> Twilio's score for each phrase is saved with the transcript row; nothing decides on it yet.</div>
+</section>
+
+</main>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); };
+
+  /* ----- shared SVG helpers ----- */
+  var NS = "http://www.w3.org/2000/svg";
+  function ctxFor(svg) {
+    var d = document.createElementNS(NS, "defs");
+    ["http", "ws", "db", "llm", "ok", "bad", "muted"].forEach(function (k) {
+      var m = document.createElementNS(NS, "marker"); m.setAttribute("id", svg.id + "-" + k); m.setAttribute("viewBox", "0 0 10 10"); m.setAttribute("refX", "9"); m.setAttribute("refY", "5");
+      m.setAttribute("markerWidth", "7"); m.setAttribute("markerHeight", "7"); m.setAttribute("orient", "auto");
+      var p = document.createElementNS(NS, "path"); p.setAttribute("d", "M0 0 L10 5 L0 10 z"); p.setAttribute("fill", "var(--" + k + ")"); m.appendChild(p); d.appendChild(m);
+    });
+    svg.appendChild(d);
+    var mk = function (n, a, t) { var e = document.createElementNS(NS, n); for (var k in a) e.setAttribute(k, a[k]); if (t != null) e.textContent = t; svg.appendChild(e); return e; };
+    return {
+      mk: mk,
+      box: function (x, y, w, h, title, lines, col, dashed) {
+        mk("rect", { x: x, y: y, width: w, height: h, rx: 8, fill: "var(--panel)", stroke: col || "var(--line)", "stroke-width": col ? 1.9 : 1.2, "stroke-dasharray": dashed ? "5 3" : "0" });
+        mk("text", { x: x + 10, y: y + 20, "font-size": 12.5, "font-weight": 600, "font-family": "var(--mono)" }, title);
+        (lines || []).forEach(function (l, i) {
+          var c = /^reads/.test(l) ? "var(--http)" : /^writes/.test(l) ? "var(--ok)" : /^calls|^LLM|^DB/.test(l) ? "var(--llm)" : "var(--muted)";
+          mk("text", { x: x + 10, y: y + 37 + i * 14.2, "font-size": 10.8, style: "fill:" + c }, l);
+        });
+      },
+      arrow: function (d, kind, dash) { mk("path", { d: d, fill: "none", stroke: "var(--" + kind + ")", "stroke-width": 1.9, "marker-end": "url(#" + svg.id + "-" + kind + ")", "stroke-dasharray": dash ? "6 4" : "0" }); },
+      lab: function (x, y, t, anchor) { mk("text", { x: x, y: y, "font-size": 10.8, "text-anchor": anchor || "start", style: "fill:var(--muted);paint-order:stroke;stroke:var(--panel);stroke-width:4px" }, t); }
+    };
+  }
+
+  /* ----- diagram 1: session life ----- */
+  var s1 = $("dg1"), g1 = ctxFor(s1);
+  g1.box(300, 10, 400, 52, "Parent answers the phone", ["Twilio: POST /twilio/voice?call_id=19&t=token"], "var(--http)");
+  g1.box(300, 100, 400, 56, "A  api.py twilio_voice", ["is the Twilio signature, or the per-call token, valid?"], "var(--http)");
+  g1.box(740, 100, 240, 56, "403", ["Twilio gets no instructions:", "it plays an error and the call drops"], "var(--bad)");
+  g1.box(300, 200, 400, 56, "B  TWILIO_VOICE_MODE", ["gather (trial)  or  stream (live audio)?"], "var(--http)");
+  g1.box(740, 200, 240, 56, "stream mode", ["TwiML <Connect><Stream>; bridge.py", "does the rest (WebSocket)"], "var(--ws)");
+  g1.box(300, 300, 400, 52, "C  GatherCalls.start(call_id)", ["gather.py"], "var(--http)");
+  g1.box(300, 396, 400, 98, "D  CallSession.__init__  (session.py)", ["LLM client; build_conversation_graph() compiles the nodes", "with a NEW MemorySaver (this session's own memory)", "thread_id = call-19; stored in CALLS.sessions[19]"], "var(--llm)");
+  g1.box(300, 540, 400, 98, "E  CallSession.open()", ["DB: build_context -> ctx; call -> in_progress", "graph.invoke({ctx, started: False}) -> open_ node", "DB: 2 opening lines saved to transcript_turns"], "var(--db)");
+  g1.box(300, 682, 400, 52, "F  _twiml(): <Gather><Say>opening</Say></Gather>", ["returned to Twilio; the parent hears it"], "var(--http)");
+  g1.box(300, 780, 400, 80, "G  parent speaks: POST /twilio/turn -> GatherCalls.turn", ["sessions.get(19): is there a session?"], "var(--http)");
+  g1.box(740, 780, 240, 80, "No session", ["apology + hang up;", "nothing recorded; call stays", "in_progress until the reaper"], "var(--bad)");
+  g1.box(20, 540, 250, 98, "Session exists", ["session.turn(): save words,", "graph.invoke({utterance}),", "save reply; back to F"], "var(--ok)");
+  g1.arrow("M500 62 L500 100", "http"); g1.arrow("M500 156 L500 200", "http"); g1.lab(508, 182, "valid");
+  g1.arrow("M700 128 L740 128", "bad"); g1.lab(704, 120, "no");
+  g1.arrow("M700 228 L740 228", "ws"); g1.lab(704, 220, "stream");
+  g1.arrow("M500 256 L500 300", "http"); g1.lab(508, 282, "gather");
+  g1.arrow("M500 352 L500 396", "http"); g1.arrow("M500 494 L500 540", "http"); g1.arrow("M500 638 L500 682", "http");
+  g1.arrow("M500 734 L500 780", "http"); g1.lab(508, 762, "Twilio listens; parent talks");
+  g1.arrow("M700 820 L740 820", "bad"); g1.lab(703, 812, "no");
+  g1.arrow("M300 820 L145 820 L145 638", "ok"); g1.lab(190, 812, "yes");
+  g1.arrow("M20 590 L10 590 L10 708 L300 708", "ok"); g1.lab(14, 700, "reply lines");
+  g1.mk("text", { x: 20, y: 872, "font-size": 11.5, style: "fill:var(--muted)" }, "Steps F and G repeat for every sentence until the call ends.");
+
+  /* ----- diagram 2: the graph ----- */
+  var s2 = $("dg2"), g2 = ctxFor(s2);
+  g2.mk("circle", { cx: 40, cy: 300, r: 22, fill: "var(--soft)", stroke: "var(--line)" }); g2.mk("text", { x: 40, y: 304, "font-size": 11, "text-anchor": "middle" }, "START");
+  g2.box(110, 40, 260, 112, "open", ["reads: ctx", "calls: system_prompt, greeting, build_steps", "LLM: one call, only on a call-back/retry", "writes: system, messages, started, counters,", "reply  (the first turn only)"], "var(--ok)");
+  g2.box(110, 250, 260, 134, "safety", ["reads: utterance, messages, silence_run,", "parent_turns", "calls: detect_emergency (pattern match)", "writes: messages += parent's words,", "emergency_hit, silence_run, parent_turns,", "resets the per-turn scratch keys"], "var(--bad)");
+  g2.box(450, 40, 270, 90, "escalate", ["DB: emergency alert", "writes: reply, done = true,", "end_reason = emergency"], "var(--bad)");
+  g2.box(450, 250, 270, 134, "agent", ["reads: system, messages (last 40)", "LLM: one JSON call, retried once", "if the draft ends with ? it drops", "book_callback / add_reminder", "writes: messages += model JSON, pending,", "say, end_call, iterations"], "var(--llm)");
+  g2.box(450, 500, 270, 100, "give_up", ["DB: unclear log + warning alert", "writes: reply, done = true,", "end_reason = completed"], "var(--warn)");
+  g2.box(800, 250, 280, 134, "tools", ["reads: pending, ctx", "calls: db_tools.call_tool for each action", "DB: log_*, book_callback, raise_alert ...", "filler spoken if a result matters", "writes: tool_log, booked, emergency, again,", "messages += TOOL RESULTS"], "var(--db)");
+  g2.box(800, 500, 280, 134, "finish", ["reads: say, end_call, messages,", "parent_turns, fillers", "guards: 24 turns, 3x repeat, 60 words,", "leak filter", "writes: reply, done, end_reason"], "var(--ok)");
+  g2.mk("rect", { x: 940, y: 40, width: 140, height: 60, rx: 30, fill: "var(--soft)", stroke: "var(--line)" }); g2.mk("text", { x: 1010, y: 76, "font-size": 12, "text-anchor": "middle", "font-weight": 600 }, "END");
+  g2.arrow("M62 296 L110 100", "http"); g2.lab(36, 190, "started = false", "start");
+  g2.arrow("M62 304 L110 316", "http"); g2.lab(54, 346, "started = true", "start");
+  g2.arrow("M240 40 L240 16 L1010 16 L1010 40", "muted", true); g2.lab(620, 12, "open ends the turn", "middle");
+  g2.arrow("M300 250 L300 175 L420 175 L420 100 L450 100", "bad"); g2.lab(310, 168, "emergency_hit");
+  g2.arrow("M370 316 L450 316", "ok"); g2.lab(372, 306, "normal");
+  g2.arrow("M280 384 L280 550 L450 550", "bad"); g2.lab(286, 470, "silence_run >= 3");
+  g2.arrow("M720 316 L800 316", "llm"); g2.lab(724, 306, "pending");
+  g2.arrow("M800 352 L720 352", "muted"); g2.lab(724, 372, "again (max 4)");
+  g2.arrow("M650 384 L650 470 L760 470 L760 540 L800 540", "muted"); g2.lab(656, 462, "no actions");
+  g2.arrow("M940 384 L940 500", "db"); g2.lab(948, 450, "done");
+  g2.arrow("M1080 560 L1090 560 L1090 82 L1080 82", "ok"); g2.lab(1062, 190, "reply, done", "end");
+  g2.arrow("M720 85 L940 70", "bad");
+  g2.arrow("M585 600 L585 652 L1102 652 L1102 66 L1080 66", "warn"); g2.lab(600, 646, "give_up ends the turn");
+  g2.mk("text", { x: 20, y: 668, "font-size": 11.5, style: "fill:var(--muted)" }, "Violet = database, pink = LLM, green = writes to the state, blue = reads from it. open, escalate, give_up and finish all end the turn (arrows to END).");
+
+  /* ----- diagram 3: information flow ----- */
+  var s3 = $("dg3"), g3 = ctxFor(s3);
+  g3.box(20, 30, 190, 74, "PostgreSQL", ["parents, routines, medicines,", "reminders, meal logs,", "previous call's transcript"], "var(--db)");
+  g3.box(260, 30, 200, 74, "build_context()", ["session.open reads the DB", "once and builds CallContext"]);
+  g3.box(510, 30, 200, 74, "ctx  (in the state)", ["who, routine, medicine/reminder,", "meal times, today's logs"]);
+  g3.box(770, 30, 210, 74, "system_prompt(ctx)", ["three jobs, scope rules, tool", "list, output format"], "var(--llm)");
+  g3.box(20, 200, 200, 74, "Parent's words", ["Twilio SpeechResult ->", "GatherCalls.turn ->", "session.turn(utterance)"], "var(--http)");
+  g3.box(270, 190, 270, 100, "state.messages  (memory)", ["user: the parent's words,", "TOOL RESULTS: [...]", "assistant: the model's JSON", "held inside this session's MemorySaver"], "var(--ok)");
+  g3.box(620, 200, 200, 74, "LLM (OpenRouter)", ["system + last 40 messages", "returns ONE JSON object"], "var(--llm)");
+  g3.box(620, 380, 260, 90, "tools node -> call_tool()", ["checks name, scope, args", "runs db_tools.<tool>", "writes rows; returns ok/result"], "var(--db)");
+  g3.box(860, 190, 120, 100, "PostgreSQL", ["rows written:", "meal/medicine logs,", "callbacks, alerts"], "var(--db)");
+  g3.box(270, 380, 270, 90, "finish node -> reply", ["lines to speak, done, end_reason", "(guards applied)"], "var(--ok)");
+  g3.box(20, 380, 200, 90, "TwiML to Twilio", ["<Say> the reply, <Gather> to", "listen again, or <Hangup>"], "var(--http)");
+  g3.arrow("M210 67 L260 67", "db"); g3.arrow("M460 67 L510 67", "http"); g3.arrow("M710 67 L770 67", "http");
+  g3.arrow("M875 104 L760 200", "llm"); g3.lab(845, 160, "system prompt");
+  g3.arrow("M220 237 L270 237", "http"); g3.lab(224, 228, "adds");
+  g3.arrow("M540 228 L620 228", "ok"); g3.lab(542, 219, "last 40");
+  g3.arrow("M620 262 L540 262", "llm"); g3.lab(542, 276, "JSON added");
+  g3.arrow("M720 274 L720 380", "llm"); g3.lab(728, 330, "actions");
+  g3.arrow("M880 425 L920 425 L920 290", "db"); g3.lab(926, 360, "writes");
+  g3.arrow("M620 430 L540 290", "ok"); g3.lab(540, 340, "TOOL RESULTS", "end");
+  g3.arrow("M405 290 L405 380", "ok"); g3.lab(412, 336, "say, end_call");
+  g3.arrow("M270 425 L220 425", "http");
+  g3.mk("text", { x: 20, y: 520, "font-size": 11.5, style: "fill:var(--muted)" }, "The model's JSON goes back into state.messages, so each model call sees its own earlier actions and the tool results.");
+
+  /* ----- stepper: one real turn ----- */
+  var BASE = {
+    ctx: "{call_id: 19, parent: Sree, routine: tablet_3_reminder, medicine: {id: 3, name: \"tablet\"}, ...}",
+    messages: [
+      { role: "user", content: "(The call has just connected.)" },
+      { role: "assistant", content: "{\"say\": \"Hello Sree, this is the CareCall assistant, calling for Sree. It is time for your tablet. Have you taken it?\", \"actions\": [], \"end_call\": false}" }
+    ],
+    started: true, parent_turns: 0, silence_run: 0, booked: false, emergency: false
+  };
+  var M3 = { role: "user", content: "No, can you remind me in 2 minutes?" };
+  var A1 = { role: "assistant", content: "{\"say\": null, \"actions\": [{\"tool\": \"log_medicine\", \"args\": {\"medicine_id\": 3, \"status\": \"not_taken\", \"evidence\": \"No\"}}, {\"tool\": \"book_callback\", \"args\": {\"in_minutes\": 2, \"reason\": \"Medicine reminder\"}}], \"end_call\": false}" };
+  var R1 = { role: "user", content: "TOOL RESULTS: [{\"tool\": \"log_medicine\", \"ok\": true}, {\"tool\": \"book_callback\", \"ok\": true, \"call_id\": 20, \"at_local\": \"11:25\", \"spoken\": \"eleven twenty-five\"}]" };
+  var A2 = { role: "assistant", content: "{\"say\": \"All right, I will call you again at eleven twenty-five this morning.\", \"actions\": [], \"end_call\": true}" };
+  var STEPS = [
+    { n: "session.turn()", d: "<code>gather.turn</code> has found the session and called <code>session.turn(\"No, can you remind me in 2 minutes?\")</code>. It saves the parent's words as a transcript row (turn 3), then calls <code>graph.invoke({\"utterance\": ...}, {thread_id: \"call-19\"})</code>. LangGraph loads the saved state for that thread and adds the new key.",
+      st: { utterance: "No, can you remind me in 2 minutes?", started: true, parent_turns: 0, messages: BASE.messages, booked: false }, route: "route_start: started is true, so go to safety" },
+    { n: "safety", d: "Appends the parent's words to the memory, runs the emergency pattern check (nothing found), counts this as a speaking turn (not silence), resets the scratch keys, and the router sends it to <b>agent</b>.",
+      st: { utterance: "No, can you remind me in 2 minutes?", messages: BASE.messages.concat([M3]), emergency_hit: null, silence_run: 0, parent_turns: 1, iterations: 0, pending: [], again: false, tool_log: [], fillers: [] }, route: "after_safety: no emergency, silence_run 0, so go to agent" },
+    { n: "agent  (model call 1)", d: "Calls the LLM with the system prompt and the last 40 messages. The model answers with two actions and no words. The hold rule checks whether the draft ends with a question: it does not, so nothing is held. The reply is added to memory as an assistant message.",
+      st: { messages: BASE.messages.concat([M3, A1]), pending: [{ tool: "log_medicine", args: "{...}" }, { tool: "book_callback", args: "{in_minutes: 2}" }], say: null, end_call: false, iterations: 1 }, route: "after_agent: pending is not empty, so go to tools" },
+    { n: "tools", d: "Speaks a filler (\"Umm... hold on a moment, let me note that down\") because the booking's result matters, then runs each action through <code>call_tool</code>. <code>log_medicine</code> writes a medicine_logs row; <code>book_callback</code> inserts call 20 and a callbacks row. The results go into memory as a user message, and the graph is told to loop.",
+      st: { messages: BASE.messages.concat([M3, A1, R1]), pending: [], tool_log: [{ tool: "log_medicine", ok: true }, { tool: "book_callback", ok: true, call_id: 20 }], booked: true, again: true, fillers: ["Umm... hold on a moment, let me note that down."], say: null }, route: "after_tools: again is true and iterations 1 < 4, so back to agent" },
+    { n: "agent  (model call 2)", d: "The model now sees its own actions and the booking result in its memory, so it can state the real time. It says the goodbye and sets <code>end_call</code> true. No actions, so nothing more to run.",
+      st: { messages: BASE.messages.concat([M3, A1, R1, A2]), pending: [], say: "All right, I will call you again at eleven twenty-five this morning.", end_call: true, iterations: 2 }, route: "after_agent: no actions, so go to finish" },
+    { n: "finish", d: "Applies the guards: under 24 turns, line not said three times, under 60 words, no leak. Builds the reply from the stalling line plus the final line. End reason is <code>callback</code> because a booking succeeded.",
+      st: { reply: ["Umm... hold on a moment, let me note that down.", "All right, I will call you again at eleven twenty-five this morning."], done: true, end_reason: "callback" }, route: "END: invoke returns this to session.turn()" },
+    { n: "back out", d: "<code>session.turn</code> saves both reply lines to the transcript (turns 4 and 5), removes any line already spoken live, and returns <code>TurnResult(reply, done=true, end_reason=\"callback\")</code>. <code>gather._answer</code> sees <code>done</code>, schedules <code>session.finish</code>, and sends Twilio the lines plus a hang-up.",
+      st: { TurnResult: { reply: "2 lines", done: true, end_reason: "callback", latency_ms: "~3000" }, next: "session.finish() -> post_call -> outcome.apply()" }, route: "the call ends" }
+  ];
+  var cur = 0, host = $("stepper"), prev = {};
+  function render() {
+    var s = STEPS[cur];
+    var bar = STEPS.map(function (x, i) { return '<button type="button" data-i="' + i + '"' + (i === cur ? ' class="on"' : "") + ">" + (i + 1) + "</button>"; }).join("") +
+      '<span class="nav"><button type="button" data-d="-1">Back</button><button type="button" data-d="1">Next</button></span>';
+    var prevState = cur > 0 ? STEPS[cur - 1].st : {};
+    var lines = Object.keys(s.st).map(function (k) {
+      var v = s.st[k], txt = JSON.stringify(v, null, 1);
+      if (k === "messages") { txt = "[" + v.length + " messages]\n" + v.map(function (m, i) { var c = m.content.length > 130 ? m.content.slice(0, 127) + "..." : m.content; return " " + (i + 1) + ". " + m.role + ": " + c; }).join("\n"); }
+      var changed = JSON.stringify(prevState[k]) !== JSON.stringify(v);
+      return '<span class="' + (changed ? "chg" : "") + '"><span class="k">' + esc(k) + ":</span> " + esc(txt) + "</span>";
+    }).join("");
+    host.innerHTML = '<div class="bar"><b style="font-size:13px">Step ' + (cur + 1) + " of " + STEPS.length + "</b>" + bar + '</div><div class="cols"><div class="what"><h4>' + esc(s.n) + "</h4><p>" + s.d + '</p><p><span class="pill">' + esc(s.route) + '</span></p></div><div class="snap"><h5>State after this step (green = changed)</h5><pre>' + lines + "</pre></div></div>";
+  }
+  host.addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.i != null) cur = Number(b.dataset.i);
+    if (b.dataset.d) cur = Math.max(0, Math.min(STEPS.length - 1, cur + Number(b.dataset.d)));
+    render();
+  });
+  render();
+
+  var links = [].slice.call(document.querySelectorAll("nav.index a"));
+  if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) links.forEach(function (a) { a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id); }); }); }, { rootMargin: "-20% 0px -70% 0px" });
+    links.forEach(function (a) { var s = document.querySelector(a.getAttribute("href")); if (s) io.observe(s); });
+  }
+})();
+</script>
+</body>
+</html>

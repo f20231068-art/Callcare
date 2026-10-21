@@ -1,0 +1,68 @@
+# Use case: defined_reminder (doctor appointment). One question: step id "ack".
+# Reminder text: "You have an appointment with Doctor Rao tomorrow evening."
+
+- id: dr_ack_simple_mohan
+  usecase: defined_reminder
+  routine: doctor_reminder
+  name: Mohan, 71
+  profile: Polite and brief. Hears it and acknowledges.
+  traits: [polite, brief]
+  truth: {heard: true}
+  lines:
+    ack: ["Okay, thank you."]
+  expect:
+    end_reason: completed
+    reminder_acks: [{acknowledged: true}]
+    alerts: []
+
+- id: dr_asks_details_bhavani
+  usecase: defined_reminder
+  routine: doctor_reminder
+  name: Bhavani, 69
+  profile: Wants the details repeated (which doctor, what time) before she acknowledges. The reminder only says "tomorrow evening".
+  traits: [detail_oriented, careful]
+  truth: {heard: true_after_repeat}
+  lines:
+    ack: ["Which doctor? What time, say again.", "Okay, got it. Tomorrow evening."]
+  expect:
+    end_reason: completed
+    reminder_acks: [{acknowledged: true}]
+
+- id: dr_conflict_sudha
+  usecase: defined_reminder
+  routine: doctor_reminder
+  name: Sudha, 73
+  profile: Hears it but cannot go because her daughter is visiting. The family needs to reschedule.
+  traits: [apologetic, has_conflict]
+  truth: {heard: true, can_attend: false, reason: "daughter visiting tomorrow"}
+  lines:
+    ack: ["Oh, I cannot go tomorrow, my daughter is coming. But I heard you."]
+  expect:
+    reminder_acks: [{acknowledged: true}]
+    alerts_include: [{severity: info}]
+
+- id: dr_repeats_anand
+  usecase: defined_reminder
+  routine: doctor_reminder
+  name: Anand, 82
+  profile: Mild memory issues, asks the same thing twice before settling.
+  traits: [forgetful, repeats_questions]
+  truth: {heard: true_after_repeat}
+  lines:
+    ack: ["Which doctor is it? When is it?", "Sorry, what was it again?", "Ah okay, understood."]
+  expect:
+    end_reason: completed
+    reminder_acks: [{acknowledged: true}]
+
+- id: dr_silent_ganesh
+  usecase: defined_reminder
+  routine: doctor_reminder
+  name: Ganesh, 85
+  profile: Phone picked up but he does not respond (asleep or phone left on a table). The agent must not claim acknowledgement.
+  traits: [silent]
+  truth: {heard: false}
+  lines:
+    ack: ["", "", ""]
+  expect:
+    reminder_acks: [{acknowledged: false}]
+    alerts_include: [{severity: warning}]

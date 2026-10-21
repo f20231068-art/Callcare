@@ -1,0 +1,85 @@
+# Use case: meal_discovery. The agent asks, one meal at a time: breakfast, lunch, snack, dinner.
+# `lines` = what the persona says per question (step id). A list is indexed by how many times that question
+# has been asked, the last entry repeats. `truth` is what is actually true (the LLM persona must stay consistent
+# with it; the scripted persona just speaks its lines). `expect` is what a correct agent must end up recording.
+
+- id: md_clear_kamala
+  usecase: meal_discovery
+  routine: meal_discovery
+  name: Kamala, 72
+  profile: Retired teacher. Clear, cooperative, precise about times. Speaks in short full sentences.
+  traits: [clear, cooperative, precise]
+  truth: {breakfast: "08:00", lunch: "13:00", snack: "17:00", dinner: "20:30"}
+  lines:
+    time_breakfast: ["Around eight in the morning."]
+    time_lunch: ["Lunch is at one pm."]
+    time_snack: ["I have tea and biscuits at five in the evening."]
+    time_dinner: ["Dinner is at eight thirty."]
+  expect:
+    end_reason: completed
+    meal_profile_unchanged: true  # the caretaker fixes meal times; what the parent says is passed to the family, not scheduled
+    alerts: []
+
+- id: md_vague_raghav
+  usecase: meal_discovery
+  routine: meal_discovery
+  name: Raghav, 66
+  profile: Retired clerk with no fixed routine. Answers vaguely first, gives a real time only when pressed once.
+  traits: [vague, easygoing]
+  truth: {breakfast: "09:00", lunch: "14:00", snack: "17:30", dinner: "21:00"}
+  lines:
+    time_breakfast: ["Whenever I wake up, no fixed time.", "Okay, around nine o'clock."]
+    time_lunch: ["Two pm, roughly."]
+    time_snack: ["Five thirty or so."]
+    time_dinner: ["Nine at night."]
+  expect:
+    end_reason: completed
+    meal_profile_unchanged: true  # the caretaker fixes meal times; what the parent says is passed to the family, not scheduled
+
+- id: md_chatty_savitri
+  usecase: meal_discovery
+  routine: meal_discovery
+  name: Savitri, 79
+  profile: Lonely, delighted to have someone to talk to. Wraps every answer in a story, the time is buried in it.
+  traits: [chatty, lonely, tangents]
+  truth: {breakfast: "08:30", lunch: "13:30", snack: "16:30", dinner: "20:00"}
+  lines:
+    time_breakfast: ["Oh, in the morning I have my filter coffee first, then idli at about half past eight, you know my son always says I should have oats but I like my idli."]
+    time_lunch: ["Lunch, ah, my neighbour Mrs Iyer sends sambar sometimes, we eat around one thirty."]
+    time_snack: ["A little murukku at four thirty with the evening news, I never miss the news."]
+    time_dinner: ["Early dinner at eight, my daughter-in-law says late eating is bad."]
+  expect:
+    end_reason: completed
+    meal_profile_unchanged: true  # the caretaker fixes meal times; what the parent says is passed to the family, not scheduled
+
+- id: md_hard_of_hearing_gopal
+  usecase: meal_discovery
+  routine: meal_discovery
+  name: Gopal, 81
+  profile: Hard of hearing on the phone. Asks for repetition, then answers loudly and clearly.
+  traits: [hard_of_hearing, patient]
+  truth: {breakfast: "07:30", lunch: "12:30", snack: "16:00", dinner: "19:30"}
+  lines:
+    time_breakfast: ["What? Say again?", "Seven thirty."]
+    time_lunch: ["Eh? What did you say?", "Twelve thirty."]
+    time_snack: ["Four o'clock."]
+    time_dinner: ["Half past seven."]
+  expect:
+    end_reason: completed
+    meal_profile_unchanged: true  # the caretaker fixes meal times; what the parent says is passed to the family, not scheduled
+
+- id: md_skeptical_meena
+  usecase: meal_discovery
+  routine: meal_discovery
+  name: Meena, 70
+  profile: Wary of phone scams. Wants to know who is calling and why before sharing anything, then cooperates.
+  traits: [suspicious, protective, cooperative_after_reassurance]
+  truth: {breakfast: "07:00", lunch: "12:00", snack: "16:00", dinner: "19:00"}
+  lines:
+    time_breakfast: ["Why are you asking me this? Who is this?", "Hmm, okay. Around seven."]
+    time_lunch: ["Twelve."]
+    time_snack: ["Four in the evening."]
+    time_dinner: ["Seven at night."]
+  expect:
+    end_reason: completed
+    meal_profile_unchanged: true  # the caretaker fixes meal times; what the parent says is passed to the family, not scheduled
